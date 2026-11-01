@@ -80,14 +80,24 @@ export type CustomerDetail = {
   events: CustomerEvent[]
 }
 
-// Backend CSV parsing is still a stub (returns `message`); the row-level fields are what the mock returns.
+/** Mock CSV check (FEATURE_BACKEND.csv = 'mock'): validates rows only, writes nothing. */
 export type UploadResult = {
   ok: boolean
   import_id: string
-  message?: string
-  inserted?: number
-  updated?: number
-  skipped?: number
-  errors?: Array<{ line: number; reason: string }>
+  mocked?: boolean
+  rows: number
+  valid: number
+  errors: Array<{ line: number; reason: string }>
 }
-export type SyntheticResult = { ok: boolean; import_id: string; customers: number }
+
+/** POST /data/synthetic — apps/api/app/api/v1/data.py */
+export type SyntheticResult = {
+  ok: boolean
+  import_id: string
+  customers: number
+  customers_inserted?: number
+  events_inserted?: number
+}
+
+/** DELETE /data/synthetic */
+export type SyntheticDeleteResult = { ok: boolean; deleted_customers: number }

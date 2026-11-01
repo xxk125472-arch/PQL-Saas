@@ -9,7 +9,7 @@ type Props = { title: string; description?: string; hint: string; icon?: ReactNo
 
 export function Placeholder({ title, description, hint, icon }: Props) {
   return (
-    <Page>
+    <Page title={title}>
       <PageHeader title={title} description={description} />
       <Card>
         <EmptyState

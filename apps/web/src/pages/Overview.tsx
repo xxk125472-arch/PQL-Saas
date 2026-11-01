@@ -43,7 +43,7 @@ export function Overview() {
   const isEmpty = data?.customer_total === 0
 
   return (
-    <Page>
+    <Page title="总览">
       <PageHeader
         title="总览"
         description="当前租户的生命周期漏斗与关键客户指标。"
@@ -136,11 +136,11 @@ function FunnelChart({ data }: { data: Funnel }) {
             </div>
             <div className="h-7 overflow-hidden rounded-md bg-surface-2">
               <div
-                className="h-full origin-left rounded-md bg-primary"
+                className="h-full origin-left rounded-md"
                 style={{
                   width: `${(count / max) * 100}%`,
-                  opacity: 1 - i * 0.18,
-                  animation: `grow-x 500ms cubic-bezier(0.32,0.72,0,1) ${i * 70}ms both`,
+                  background: `var(--funnel-${i + 1})`,
+                  animation: `grow-x 280ms cubic-bezier(0.32,0.72,0,1) ${i * 40}ms both`,
                 }}
               />
             </div>

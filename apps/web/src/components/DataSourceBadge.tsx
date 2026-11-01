@@ -1,15 +1,18 @@
-import { getDataSource } from '@/lib/dataSource'
+import { API_BASE } from '@/lib/api'
+import { FEATURE_LABEL, MOCKED_FEATURES } from '@/lib/backend'
 
-/** Small mono badge so demos never confuse sample data with the live API. */
+/** Mono badge so demos never confuse mocked features with the live API. */
 export function DataSourceBadge() {
-  const mock = getDataSource() === 'mock'
+  const mocked = MOCKED_FEATURES.map((f) => FEATURE_LABEL[f]).join('、')
+  const host = API_BASE.replace(/^https?:\/\//, '')
   return (
     <span
       className="inline-flex h-6 items-center gap-1.5 rounded-full bg-surface px-2.5 font-mono text-xs text-body shadow-l1"
-      title={mock ? '当前使用 data/sample 本地样例数据' : '当前连接 http://127.0.0.1:8000'}
+      title={mocked ? `已连接 ${API_BASE}；仍为模拟：${mocked}` : `已连接 ${API_BASE}`}
     >
-      <span className="size-1.5 rounded-full" style={{ background: mock ? 'var(--warning)' : 'var(--hue-mint)' }} />
-      {mock ? '本地样例' : '真实接口'}
+      <span className="size-1.5 rounded-full bg-[var(--hue-mint)]" />
+      {host}
+      {mocked && <span className="text-mute">· 部分模拟</span>}
     </span>
   )
 }

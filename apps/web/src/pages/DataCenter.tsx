@@ -1,45 +1,51 @@
 import { useRef, useState } from 'react'
-import type { DragEvent } from 'react'
-import { Link } from 'react-router-dom'
+import type { DragEvent, ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Download, FileText, Link2, Sparkles, Upload } from 'lucide-react'
+import { Download, FileText, Link2, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Page, PageHeader } from '@/layout/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ErrorBanner } from '@/components/EmptyState'
 import { errorMessage, request } from '@/lib/api'
+import { FEATURE_BACKEND } from '@/lib/backend'
 import { formatDateTime } from '@/lib/format'
-import { generateSynthetic } from '@/lib/synthetic'
+import { deleteSynthetic, generateSynthetic } from '@/lib/synthetic'
 import type { UploadResult } from '@/lib/types'
 
 const MAX_BYTES = 2 * 1024 * 1024
+const PARSER_PENDING = '解析功能即将上线'
 
-type JobType = 'synthetic' | 'csv_customers' | 'csv_events' | 'feishu'
+type JobType = 'synthetic' | 'synthetic_delete' | 'csv_customers' | 'csv_events' | 'feishu'
 type Job = { id: string; type: JobType; ok: boolean; at: string; summary: string }
+type AddJob = (j: Omit<Job, 'at'>) => void
 
 const JOB_LABEL: Record<JobType, string> = {
-  synthetic: '合成数据',
-  csv_customers: 'CSV · 客户',
-  csv_events: 'CSV · 事件',
+  synthetic: '生成演示数据',
+  synthetic_delete: '删除演示数据',
+  csv_customers: 'CSV · 客户表',
+  csv_events: 'CSV · 事件表',
   feishu: '飞书同步',
 }
 
 const TEMPLATES = {
-  customers: { file: 'customers.csv', header: 'external_id,name', sample: 'CUST-001,示例客户' },
+  customers: { file: 'customers.csv', columns: ['external_id', 'name'], optional: [] as string[], sample: 'CUST-001,示例客户' },
   events: {
     file: 'events.csv',
-    header: 'external_customer_id,event_type,occurred_at,feature_key',
+    columns: ['external_customer_id', 'event_type', 'occurred_at'],
+    optional: ['feature_key'],
     sample: 'CUST-001,install,2026-10-29T08:00:00Z,',
   },
-} as const
+}
 
 function downloadTemplate(kind: keyof typeof TEMPLATES) {
   const t = TEMPLATES[kind]
-  const blob = new Blob([`﻿${t.header}\n${t.sample}\n`], { type: 'text/csv;charset=utf-8' })
+  const header = [...t.columns, ...t.optional].join(',')
+  const blob = new Blob([`﻿${header}\n${t.sample}\n`], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -48,20 +54,24 @@ function downloadTemplate(kind: keyof typeof TEMPLATES) {
   URL.revokeObjectURL(url)
 }
 
+function Mono({ children }: { children: ReactNode }) {
+  return <code className="rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground">{children}</code>
+}
+
 export function DataCenter() {
-  // No imports-list endpoint yet (API contract), so recent jobs are kept for this session only.
+  // No imports-list endpoint in the API contract yet, so jobs are kept for this session only.
   const [jobs, setJobs] = useState<Job[]>([])
-  const addJob = (job: Omit<Job, 'at'>) => setJobs((js) => [{ ...job, at: new Date().toISOString() }, ...js].slice(0, 20))
+  const addJob: AddJob = (job) => setJobs((js) => [{ ...job, at: new Date().toISOString() }, ...js].slice(0, 20))
 
   return (
-    <Page>
+    <Page title="数据中心">
       <PageHeader title="数据中心" description="生成演示数据、上传 CSV，或从飞书只读同步客户与事件。" />
 
       <Tabs defaultValue="synthetic" className="grid gap-5">
         <TabsList>
           <TabsTrigger value="synthetic">
             <Sparkles />
-            合成数据
+            演示数据
           </TabsTrigger>
           <TabsTrigger value="csv">
             <FileText />
@@ -77,8 +87,8 @@ export function DataCenter() {
           <SyntheticPanel onJob={addJob} />
         </TabsContent>
         <TabsContent value="csv" className="grid gap-4 md:grid-cols-2">
-          <UploadPanel kind="customers" title="客户 customers.csv" desc="必填列：external_id, name" onJob={addJob} />
-          <UploadPanel kind="events" title="事件 events.csv" desc="必填列：external_customer_id, event_type, occurred_at；可选 feature_key" onJob={addJob} />
+          <UploadPanel kind="customers" title="客户表" onJob={addJob} />
+          <UploadPanel kind="events" title="事件表" onJob={addJob} />
         </TabsContent>
         <TabsContent value="feishu">
           <FeishuPanel onJob={addJob} />
@@ -119,22 +129,31 @@ export function DataCenter() {
   )
 }
 
-function SyntheticPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
-  const [open, setOpen] = useState(false)
+function SyntheticPanel({ onJob }: { onJob: AddJob }) {
+  const navigate = useNavigate()
+  const [confirm, setConfirm] = useState<'generate' | 'delete' | null>(null)
   const [running, setRunning] = useState(false)
 
   async function run() {
+    const action = confirm
+    if (!action) return
     setRunning(true)
     try {
-      const res = await generateSynthetic()
-      toast.success(`已生成 ${res.customers} 位演示客户`, {
-        action: { label: '查看总览', onClick: () => window.location.assign('/overview') },
-      })
-      onJob({ id: res.import_id, type: 'synthetic', ok: true, summary: `写入 ${res.customers} 位客户` })
-      setOpen(false)
+      if (action === 'generate') {
+        const res = await generateSynthetic()
+        toast.success(`已生成 ${res.customers} 位演示客户`, {
+          action: { label: '查看总览', onClick: () => navigate('/overview') },
+        })
+        onJob({ id: res.import_id, type: 'synthetic', ok: true, summary: `共 ${res.customers} 位客户，新增事件 ${res.events_inserted ?? '—'} 条` })
+      } else {
+        const res = await deleteSynthetic()
+        toast.success(`已删除 ${res.deleted_customers} 位演示客户`)
+        onJob({ id: crypto.randomUUID(), type: 'synthetic_delete', ok: true, summary: `删除 ${res.deleted_customers} 位客户` })
+      }
+      setConfirm(null)
     } catch (err) {
       toast.error(errorMessage(err))
-      onJob({ id: crypto.randomUUID(), type: 'synthetic', ok: false, summary: errorMessage(err) })
+      onJob({ id: crypto.randomUUID(), type: action === 'generate' ? 'synthetic' : 'synthetic_delete', ok: false, summary: errorMessage(err) })
     } finally {
       setRunning(false)
     }
@@ -144,25 +163,35 @@ function SyntheticPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
     <Card>
       <CardContent className="flex flex-wrap items-start justify-between gap-6 p-6">
         <div className="grid max-w-xl gap-2">
-          <h2 className="heading text-base">生成演示数据</h2>
+          <h2 className="heading text-base">演示数据</h2>
           <p className="text-[13px] leading-5 text-body">
             一键写入 80 位样例客户及其事件，覆盖安装 → 首次价值 → 复用 → 留存全链路，以及新客、风险、流失客户，并立即重算健康分与 PQL。
           </p>
           <p className="text-[13px] leading-5 text-body">
-            再次生成只会替换 <span className="font-mono text-xs">source=synthetic</span> 的数据，CSV 与飞书导入的客户保持不变。
+            生成与删除都只作用于 <Mono>source=synthetic</Mono> 的客户，CSV 与飞书导入的客户保持不变。
           </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
-          <Sparkles />
-          生成演示数据
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => setConfirm('delete')}>
+            <Trash2 />
+            删除演示数据
+          </Button>
+          <Button onClick={() => setConfirm('generate')}>
+            <Sparkles />
+            生成演示数据
+          </Button>
+        </div>
       </CardContent>
 
-      <Dialog open={open} onOpenChange={(o) => !running && setOpen(o)}>
+      <Dialog open={confirm !== null} onOpenChange={(o) => !running && !o && setConfirm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认生成演示数据？</DialogTitle>
-            <DialogDescription>将替换当前租户中已有的演示数据（source=synthetic），CSV 与飞书导入的客户不受影响。</DialogDescription>
+            <DialogTitle>{confirm === 'delete' ? '确认删除演示数据？' : '确认生成演示数据？'}</DialogTitle>
+            <DialogDescription>
+              {confirm === 'delete'
+                ? '将删除当前租户全部演示客户及其事件与分数，此操作不可撤销。CSV 与飞书导入的客户不受影响。'
+                : '将载入样例客户与事件；已存在的演示数据会被保留并去重。CSV 与飞书导入的客户不受影响。'}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
@@ -170,8 +199,8 @@ function SyntheticPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
                 取消
               </Button>
             </DialogClose>
-            <Button loading={running} onClick={run}>
-              确认生成
+            <Button variant={confirm === 'delete' ? 'destructive' : 'default'} loading={running} onClick={run}>
+              {confirm === 'delete' ? '确认删除' : '确认生成'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -180,17 +209,9 @@ function SyntheticPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
   )
 }
 
-function UploadPanel({
-  kind,
-  title,
-  desc,
-  onJob,
-}: {
-  kind: 'customers' | 'events'
-  title: string
-  desc: string
-  onJob: (j: Omit<Job, 'at'>) => void
-}) {
+function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; title: string; onJob: AddJob }) {
+  const template = TEMPLATES[kind]
+  const mocked = FEATURE_BACKEND.csv === 'mock'
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -217,14 +238,15 @@ function UploadPanel({
     try {
       const res = await request<UploadResult>(`/data/csv/${kind}`, { method: 'POST', body: form })
       setResult(res)
-      const errs = res.errors?.length ?? 0
-      const summary =
-        res.inserted !== undefined
-          ? `新增 ${res.inserted} 行${res.updated ? `，更新 ${res.updated} 行` : ''}${res.skipped ? `，跳过重复 ${res.skipped} 行` : ''}${errs ? `，${errs} 行出错` : ''}`
-          : '文件已接收，后端解析开发中'
-      onJob({ id: res.import_id, type, ok: true, summary })
-      if (errs) toast.warning(`${file.name}：${errs} 行未导入，请查看错误明细`)
-      else toast.success(`${file.name} 导入完成`)
+      const errs = res.errors.length
+      onJob({
+        id: res.import_id,
+        type,
+        ok: true,
+        summary: `校验 ${res.rows} 行，${errs} 行有误${res.mocked ? `（${PARSER_PENDING}，未写入）` : ''}`,
+      })
+      if (errs) toast.warning(`${file.name}：${errs} 行有误，请查看错误明细`)
+      else toast.success(res.mocked ? `${file.name} 校验通过，${PARSER_PENDING}` : `${file.name} 导入完成`)
     } catch (err) {
       setError(errorMessage(err))
       onJob({ id: crypto.randomUUID(), type, ok: false, summary: errorMessage(err) })
@@ -246,9 +268,10 @@ function UploadPanel({
   return (
     <Card>
       <CardHeader>
-        <div className="grid gap-0.5">
+        <div className="flex flex-wrap items-center gap-2">
           <CardTitle>{title}</CardTitle>
-          <CardDescription>{desc}</CardDescription>
+          <Mono>{template.file}</Mono>
+          {mocked && <Badge tone="gray">{PARSER_PENDING}</Badge>}
         </div>
         <Button variant="ghost" size="sm" onClick={() => downloadTemplate(kind)}>
           <Download />
@@ -256,6 +279,21 @@ function UploadPanel({
         </Button>
       </CardHeader>
       <CardContent className="grid gap-3">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-body">
+          必填列
+          {template.columns.map((c) => (
+            <Mono key={c}>{c}</Mono>
+          ))}
+          {template.optional.length > 0 && (
+            <>
+              <span className="ml-1">可选</span>
+              {template.optional.map((c) => (
+                <Mono key={c}>{c}</Mono>
+              ))}
+            </>
+          )}
+        </div>
+
         <button
           type="button"
           disabled={uploading}
@@ -270,7 +308,7 @@ function UploadPanel({
           className="grid justify-items-center gap-2 rounded-lg border border-dashed border-border-strong/60 bg-background px-5 py-8 text-center text-[13px] text-body transition-colors duration-150 hover:border-foreground/40 hover:bg-surface-2/60 disabled:cursor-wait disabled:opacity-60 data-[drag]:border-foreground/50 data-[drag]:bg-surface-2"
         >
           <Upload className="size-5 text-mute" />
-          <span className="font-medium text-foreground">{uploading ? '正在上传…' : '点击选择或拖拽文件到此处'}</span>
+          <span className="font-medium text-foreground">{uploading ? '正在校验…' : '点击选择或拖拽文件到此处'}</span>
           <span className="text-xs text-mute">UTF-8 编码，单个文件不超过 2MB</span>
         </button>
         <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
@@ -279,28 +317,18 @@ function UploadPanel({
 
         {result && (
           <div className="animate-fade-in grid gap-2 rounded-lg bg-surface-2 px-4 py-3 text-[13px]">
-            {result.inserted !== undefined ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-body">
-                <span>
-                  新增 <span className="num font-medium text-foreground">{result.inserted}</span>
-                </span>
-                {result.updated !== undefined && (
-                  <span>
-                    更新 <span className="num font-medium text-foreground">{result.updated}</span>
-                  </span>
-                )}
-                {result.skipped !== undefined && (
-                  <span>
-                    重复跳过 <span className="num font-medium text-foreground">{result.skipped}</span>
-                  </span>
-                )}
-                <span>
-                  出错 <span className="num font-medium" style={{ color: errors.length ? 'var(--destructive)' : undefined }}>{errors.length}</span>
-                </span>
-              </div>
-            ) : (
-              <span className="text-body">文件已接收，后端解析功能开发中。</span>
-            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-body">
+              <span>
+                共 <span className="num font-medium text-foreground">{result.rows}</span> 行
+              </span>
+              <span>
+                通过 <span className="num font-medium text-foreground">{result.valid}</span>
+              </span>
+              <span>
+                有误 <span className="num font-medium" style={{ color: errors.length ? 'var(--destructive)' : undefined }}>{errors.length}</span>
+              </span>
+            </div>
+            {result.mocked && <span className="text-xs text-mute">{PARSER_PENDING}，本次仅做格式校验，未写入数据。</span>}
             {errors.length > 0 && (
               <ul className="grid gap-1 font-mono text-xs text-destructive-deep">
                 {(showAllErrors ? errors : errors.slice(0, 5)).map((e) => (
@@ -324,7 +352,7 @@ function UploadPanel({
   )
 }
 
-function FeishuPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
+function FeishuPanel({ onJob }: { onJob: AddJob }) {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -350,7 +378,7 @@ function FeishuPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
           <div className="grid max-w-xl gap-2">
             <h2 className="heading text-base">飞书表格 / 多维表格只读同步</h2>
             <p className="text-[13px] leading-5 text-body">
-              按字段映射拉取客户与事件，写入 <span className="font-mono text-xs">source=feishu</span>，不会回写飞书。凭证与字段映射在设置页配置。
+              按字段映射拉取客户与事件，写入 <Mono>source=feishu</Mono>，不会回写飞书。凭证与字段映射在设置页配置。
             </p>
           </div>
           <div className="flex gap-2">
@@ -362,9 +390,12 @@ function FeishuPanel({ onJob }: { onJob: (j: Omit<Job, 'at'>) => void }) {
             </Button>
           </div>
         </div>
-        <div className="grid gap-1.5 rounded-lg bg-surface-2 px-4 py-3 text-[13px] text-body">
-          <span className="font-mono text-xs text-mute">必填映射</span>
-          客户 ID → external_id · 客户名称 → name · 事件类型 → event_type · 事件时间 → occurred_at
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-2 px-4 py-3 text-[13px] text-body">
+          <span className="mr-1 font-mono text-xs text-mute">必填映射</span>
+          客户 ID → <Mono>external_id</Mono>
+          · 客户名称 → <Mono>name</Mono>
+          · 事件类型 → <Mono>event_type</Mono>
+          · 事件时间 → <Mono>occurred_at</Mono>
         </div>
         {error && <ErrorBanner message={error} />}
       </CardContent>

@@ -167,7 +167,7 @@ function FactorGroup({ title, labels, values }: { title: string; labels: Record<
             <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
               <div
                 className="h-full origin-left rounded-full bg-primary"
-                style={{ width: `${Math.max(0, Math.min(100, v ?? 0))}%`, animation: 'grow-x 400ms cubic-bezier(0.32,0.72,0,1) both' }}
+                style={{ width: `${Math.max(0, Math.min(100, v ?? 0))}%`, animation: 'grow-x 280ms cubic-bezier(0.32,0.72,0,1) both' }}
               />
             </div>
             <span className="num text-right text-foreground">{v === undefined ? '—' : Math.round(v)}</span>

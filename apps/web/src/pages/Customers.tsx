@@ -91,7 +91,6 @@ export function Customers() {
     return request<CustomerList>(`/customers?${params}`)
   }, [q, stage, pql, page])
 
-  // The API has no health-level filter; it narrows the loaded page.
   const rows = useMemo(() => {
     const items = data?.items ?? []
     return health === ALL ? items : items.filter((c) => healthLevel(c.health_score) === health)
@@ -119,7 +118,7 @@ export function Customers() {
   }
 
   return (
-    <Page>
+    <Page title="客户">
       <PageHeader title="客户" description="阶段、健康分、PQL 与建议动作。点击任意一行查看详情。" />
 
       <div className="grid gap-4">
@@ -139,7 +138,11 @@ export function Customers() {
             </div>
             <FilterSelect label="阶段" value={stage} onChange={withPageReset(setStage)} options={STAGE_OPTIONS} />
             <FilterSelect label="是否 PQL" value={pql} onChange={withPageReset(setPql)} options={PQL_OPTIONS} />
-            <FilterSelect label="健康等级" value={health} onChange={setHealth} options={HEALTH_OPTIONS} />
+            {/* GET /customers has no `health` param yet, so this narrows the loaded page only. */}
+            <div className="flex items-center gap-1.5">
+              <FilterSelect label="健康等级（仅本页）" value={health} onChange={setHealth} options={HEALTH_OPTIONS} />
+              <span className="font-mono text-xs text-mute">仅本页</span>
+            </div>
             <div className="flex-1" />
             {hasFilters && (
               <Button

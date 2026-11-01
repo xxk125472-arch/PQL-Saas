@@ -1,24 +1,23 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
-import { ChevronsUpDown, Database, LayoutGrid, LogOut, Server, Settings, Sparkles, Users } from 'lucide-react'
+import { ChevronsUpDown, Database, LayoutGrid, LogOut, Settings, Sparkles, Users } from 'lucide-react'
 import { useAuth } from '@/auth/AuthProvider'
 import { Logo } from '@/components/Logo'
 import { ThemeRadioItems } from '@/components/ThemeMenu'
 import { DataSourceBadge } from '@/components/DataSourceBadge'
+import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { getDataSource, setDataSource } from '@/lib/dataSource'
-import type { DataSource } from '@/lib/dataSource'
+import { FEATURE_LABEL, MOCKED_FEATURES } from '@/lib/backend'
 import { cn } from '@/lib/utils'
+import { useDocumentTitle } from '@/lib/useDocumentTitle'
 
 const links = [
   { to: '/overview', label: '总览', Icon: LayoutGrid },
@@ -77,7 +76,11 @@ export function AppShell() {
             >
               <Icon className="size-4" />
               {label}
-              {soon && <span className="ml-auto rounded-full bg-surface-2 px-1.5 font-mono text-[10px] leading-4 text-mute">即将</span>}
+              {soon && (
+                <Badge tone="gray" className="ml-auto">
+                  即将上线
+                </Badge>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -95,7 +98,6 @@ export function AppShell() {
 }
 
 function UserMenu({ name, tenant, onLogout }: { name: string; tenant: string; onLogout: () => Promise<void> }) {
-  const source = getDataSource()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex w-full items-center gap-2.5 rounded-md p-2 text-left transition-colors duration-150 outline-none hover:bg-surface-2 data-[state=open]:bg-surface-2">
@@ -109,29 +111,15 @@ function UserMenu({ name, tenant, onLogout }: { name: string; tenant: string; on
         <ChevronsUpDown className="size-3.5 text-mute" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-56">
-        <div className="flex items-center justify-between px-2 py-1.5">
-          <span className="text-xs text-body">当前数据源</span>
+        <DropdownMenuLabel>后端</DropdownMenuLabel>
+        <div className="grid gap-1.5 px-2 pb-2">
           <DataSourceBadge />
+          {MOCKED_FEATURES.length > 0 && (
+            <span className="text-xs leading-4 text-mute">仍为模拟：{MOCKED_FEATURES.map((f) => FEATURE_LABEL[f]).join('、')}</span>
+          )}
         </div>
         <DropdownMenuSeparator />
         <ThemeRadioItems />
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>数据源</DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={source}
-          onValueChange={(v) => {
-            if (v !== source) setDataSource(v as DataSource)
-          }}
-        >
-          <DropdownMenuRadioItem value="mock">
-            <Database />
-            本地样例（data/sample）
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="api">
-            <Server />
-            真实接口
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void onLogout()}>
           <LogOut />
@@ -155,8 +143,9 @@ export function PageHeader({ title, description, actions }: { title: string; des
 }
 
 /** Page container: 150–200ms fade + 8px rise on route change (UI-IA §7.4). */
-export function Page({ children }: { children: ReactNode }) {
+export function Page({ title, children }: { title: string; children: ReactNode }) {
   const { pathname } = useLocation()
+  useDocumentTitle(title)
   return (
     <div key={pathname} className="animate-page-in mx-auto max-w-[1280px] px-4 pt-7 pb-16 md:px-8">
       {children}

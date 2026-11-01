@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { UNAUTHORIZED_EVENT, request, tokenStore } from '../lib/api'
+import { toast } from 'sonner'
+import { ApiError, UNAUTHORIZED_EVENT, request, tokenStore } from '../lib/api'
 import type { Me, TokenResponse } from '../lib/types'
 
 type Status = 'loading' | 'authenticated' | 'anonymous'
@@ -27,8 +28,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!tokenStore.get()) return
-    loadMe().catch(() => {
-      tokenStore.clear()
+    loadMe().catch((err) => {
+      // Keep the token when the server is merely unreachable; only a 401 invalidates it.
+      if (err instanceof ApiError && err.status === 401) tokenStore.clear()
+      else toast.error(err instanceof ApiError ? err.message : '发生未知错误，请稍后重试')
       setUser(null)
       setStatus('anonymous')
     })
@@ -37,7 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onUnauthorized = () => {
       setUser(null)
-      setStatus('anonymous')
+      setStatus((prev) => {
+        // fixed id: sonner dedupes, so StrictMode's double-invoked updater shows one toast
+        if (prev === 'authenticated') toast.error('登录已过期，请重新登录', { id: 'session-expired' })
+        return 'anonymous'
+      })
     }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)

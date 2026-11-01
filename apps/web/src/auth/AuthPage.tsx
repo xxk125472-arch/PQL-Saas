@@ -8,16 +8,18 @@ import { Label } from '@/components/ui/label'
 import { Logo } from '@/components/Logo'
 import { ThemeMenu } from '@/components/ThemeMenu'
 import { DataSourceBadge } from '@/components/DataSourceBadge'
-import { errorMessage } from '@/lib/api'
+import { PASSWORD_MIN_LENGTH, errorMessage } from '@/lib/api'
+import { useDocumentTitle } from '@/lib/useDocumentTitle'
 import { useAuth } from './AuthProvider'
 import './auth.css'
 
 type Mode = 'login' | 'register'
-type Phase = 'idle' | 'submitting' | 'success' | 'leaving'
+type Phase = 'idle' | 'submitting' | 'leaving'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const PASSWORD_MIN = 8
-const LEAVE_MS = 760
+const PASSWORD_MIN = PASSWORD_MIN_LENGTH
+// Whole sign-in → overview hand-off, kept under the 800ms budget (UI-IA §7.5).
+const LEAVE_MS = 600
 
 function validate(identifier: string, password: string) {
   const errors: { identifier?: string; password?: string } = {}
@@ -78,6 +80,7 @@ export function AuthPage({ mode }: { mode: Mode }) {
   const [phase, setPhase] = useState<Phase>('idle')
   // Visitors already signed in skip straight in; a fresh sign-in plays the transition first.
   const [wasAuthedOnMount] = useState(status === 'authenticated')
+  useDocumentTitle(mode === 'login' ? '登录' : '注册')
 
   if (wasAuthedOnMount) return <Navigate to={next} replace />
 
@@ -103,9 +106,8 @@ export function AuthPage({ mode }: { mode: Mode }) {
       navigate(next, { replace: true, state: { fromAuth: true } })
       return
     }
-    setPhase('success')
-    window.setTimeout(() => setPhase('leaving'), 160)
-    window.setTimeout(() => navigate(next, { replace: true, state: { fromAuth: true } }), 160 + LEAVE_MS)
+    setPhase('leaving')
+    window.setTimeout(() => navigate(next, { replace: true, state: { fromAuth: true } }), LEAVE_MS)
   }
 
   return (
@@ -195,7 +197,7 @@ export function AuthPage({ mode }: { mode: Mode }) {
             )}
 
             <Button type="submit" size="lg" className="group w-full" loading={phase === 'submitting'} disabled={busy}>
-              {phase === 'success' || phase === 'leaving' ? (
+              {phase === 'leaving' ? (
                 <>
                   <Check />
                   正在进入工作台
