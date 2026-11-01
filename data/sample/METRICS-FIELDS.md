@@ -111,6 +111,17 @@ PRD 默认「风险静默 7 天 + 留存窗 14 天」下，若「窗内任意活
 
 `is_pql`：`pql_score ≥ pql_threshold`(70) 且 `stage ∈ {first_value, reuse, retention}`。
 
+**`is_pql` 口径（与 `apps/api/app/services/scoring.py` 一致）：**
+
+- 实现：`is_pql = pql_score >= pql_threshold and stage in PQL_STAGES`，其中 `PQL_STAGES = {"first_value", "reuse", "retention"}`，`pql_threshold` 取租户设置，默认 70。
+- `at_risk` / `churned` / `new` / `installed` 客户**一律不是 PQL**，即使 `pql_score ≥ 阈值`。原因：销售不该去追要流失的客户。
+- 注：代码中 `at_risk` / `churned` 的 `activation` 直接取 100（这两个阶段必然曾达 first_value）。
+
+**breakdown 与总分计算（健康分 / PQL 同理）：**
+
+- `health_breakdown` / `pql_breakdown` JSON 存的是各因子**原始子分**（0–100），未乘权重。
+- 总分 = Σ(原始子分 × 权重)，再截断到 0–100，保留 2 位小数（`_clamp`：`round(max(0, min(100, v)), 2)`）。
+
 ### 4.3 建议动作代码
 
 `winback` / `reengage` / `activate_install` / `drive_first_value` / `drive_reuse` / `expand_or_advocate` / `maintain`（优先级见 PRD 4.4）。
@@ -151,3 +162,42 @@ PRD 默认「风险静默 7 天 + 留存窗 14 天」下，若「窗内任意活
 - CSV 上传验收可直接用本目录两个文件。
 - 再次合成不得删除 `source=csv|feishu` 客户（PRD 6.4）。
 - 分析抽检：无 Key 时六章结构 + Banner；名单客户均属本租户；动作代码 ⊆ §4.3。
+
+---
+
+## 7. 枚举中文映射（前端展示用）
+
+仅用于前端展示，**数据库原始值不变**。
+
+### 7.1 `event_type`
+
+| 代码 | 中文 |
+|------|------|
+| `install` | 安装 |
+| `first_value` | 首次价值 |
+| `feature_use` | 功能使用 |
+| `reuse` | 复用 |
+| `retention_active` | 留存活跃 |
+
+### 7.2 `feature_key`
+
+| 代码 | 中文 |
+|------|------|
+| `dashboard` | 看板 |
+| `funnel` | 漏斗 |
+| `import_csv` | CSV 导入 |
+| `score_view` | 查看评分 |
+| `analysis` | AI 分析 |
+| `settings` | 设置 |
+| `feishu_sync` | 飞书同步 |
+
+- `feature_key` 为空：不展示。
+- 未知值：原样展示，用等宽（mono）标签包裹。
+
+---
+
+## 8. 演示话术
+
+- PQL 分衡量的是「曾经到过价值点」（到过首次价值的客户 `activation` 一律为 100），健康分衡量的是「现在的状态」，所以要两个分一起看。
+- 风险/流失客户 PQL 均分（约 46/40）可能高于已安装客户（约 41），但健康分低（约 22/14）且不计入 PQL，应走挽回动作而非销售跟进。
+- 演示或回归前先删除合成数据再重新导入；漏斗应为 72/60/36/12，当前合成租户 PQL 约 41–42。
