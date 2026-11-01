@@ -11,7 +11,7 @@ cd apps/api
 ## Database & migrations (Alembic)
 
 - Schema is managed **only** by Alembic (`alembic.ini`, `alembic/`). `Base.metadata.create_all` is no longer used.
-- The DB URL comes from app settings (`DATABASE_URL`, default `sqlite:///<repo>/apps/data/app.db`); `alembic/env.py` reads it and uses `render_as_batch=True` on SQLite.
+- The DB URL comes from app settings (`DATABASE_URL`, default `sqlite:///<repo>/data/app.db`); `alembic/env.py` reads it and uses `render_as_batch=True` on SQLite.
 - **On startup** the API runs `alembic upgrade head` (see `app/core/db.py::init_db`). Upgrading an up-to-date DB is a no-op, so it is safe to run repeatedly.
 - Manual: `.venv\Scripts\python -m alembic upgrade head` (from `apps/api`).
 - New migration: change `app/models/entities.py`, then `.venv\Scripts\python -m alembic revision --autogenerate -m "..."`.

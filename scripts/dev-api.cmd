@@ -1,4 +1,5 @@
 @echo off
+rem Default SQLite database: <repo>\data\app.db (created automatically by the API).
 cd /d %~dp0\..\apps\api
 if not exist .venv (
   python -m venv .venv
