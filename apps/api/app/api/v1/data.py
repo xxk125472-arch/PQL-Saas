@@ -1,11 +1,13 @@
 """Synthetic / CSV / Feishu sync endpoints."""
 
 import csv
+import io
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -194,18 +196,118 @@ def delete_synthetic(user: User = Depends(get_current_user), db: Session = Depen
     return {"ok": True, "deleted_customers": deleted}
 
 
+MAX_CSV_BYTES = 10 * 1024 * 1024
+MAX_CSV_ERRORS = 50
+CSV_EVENT_TYPES = {"install", "first_value", "reuse", "retention_active", "feature_use", "other"}
+
+
+class CsvFormatError(ValueError):
+    def __init__(self, detail: str, code: str = "CSV_INVALID_FORMAT"):
+        super().__init__(detail)
+        self.detail = detail
+        self.code = code
+
+
+def _parse_csv_rows(content: bytes, required_columns: tuple[str, ...]) -> list[tuple[int, dict]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise CsvFormatError("文件必须使用 UTF-8 或 UTF-8-BOM 编码", "CSV_INVALID_ENCODING") from exc
+
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if reader.fieldnames is None:
+        raise CsvFormatError("CSV 文件为空或缺少表头", "CSV_INVALID_HEADER")
+    reader.fieldnames = [(field or "").strip() for field in reader.fieldnames]
+    missing = [column for column in required_columns if column not in reader.fieldnames]
+    if missing:
+        raise CsvFormatError("缺少必填列：" + "、".join(missing), "CSV_MISSING_COLUMNS")
+    try:
+        return [(reader.line_num, row) for row in reader]
+    except csv.Error as exc:
+        raise CsvFormatError("CSV 格式错误，请检查引号和分隔符") from exc
+
+
+def _failed_csv_import(
+    db: Session,
+    job: ImportJob,
+    status_code: int,
+    detail: str,
+    code: str,
+    byte_count: int,
+) -> JSONResponse:
+    job.status = "failed"
+    job.stats_json = {"rows": 0, "inserted": 0, "updated": 0, "skipped": 0, "errors": 1, "bytes": byte_count}
+    job.error = detail
+    db.commit()
+    return JSONResponse(status_code=status_code, content={"detail": detail, "code": code})
+
+
 @router.post("/data/csv/customers")
 async def upload_customers_csv(
     file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Day1 stub: implemented in next slice; keep route for frontend contract
-    content = await file.read()
-    job = ImportJob(tenant_id=user.tenant_id, type="csv_customers", status="pending", stats_json={"bytes": len(content)})
+    tid = user.tenant_id
+    job = ImportJob(tenant_id=tid, type="csv_customers", status="pending")
     db.add(job)
+    db.flush()
+
+    content = await file.read(MAX_CSV_BYTES + 1)
+    if len(content) > MAX_CSV_BYTES:
+        return _failed_csv_import(db, job, 413, "CSV 文件不能超过 10MB", "CSV_FILE_TOO_LARGE", len(content))
+    try:
+        rows = _parse_csv_rows(content, ("external_id", "name"))
+    except CsvFormatError as exc:
+        return _failed_csv_import(db, job, 400, exc.detail, exc.code, len(content))
+
+    now = utcnow()
+    errors = []
+    customer_rows = []
+    known_external_ids = set(db.scalars(select(Customer.external_id).where(Customer.tenant_id == tid)).all())
+    inserted = 0
+    updated = 0
+    for line, row in rows:
+        if None in row:
+            errors.append({"line": line, "reason": "该行的列数多于表头"})
+            continue
+        external_id = (row.get("external_id") or "").strip()
+        name = (row.get("name") or "").strip()
+        if not external_id:
+            errors.append({"line": line, "reason": "external_id 不能为空"})
+            continue
+        if not name:
+            errors.append({"line": line, "reason": "name 不能为空"})
+            continue
+        if external_id in known_external_ids:
+            updated += 1
+        else:
+            inserted += 1
+        known_external_ids.add(external_id)
+        customer_rows.append({
+            "id": _uuid(), "tenant_id": tid, "external_id": external_id, "name": name,
+            "stage": "new", "source": "csv", "created_at": now, "updated_at": now,
+        })
+
+    if customer_rows:
+        statement = sqlite_insert(Customer).values(customer_rows)
+        db.execute(statement.on_conflict_do_update(
+            index_elements=["tenant_id", "external_id"],
+            set_={"name": statement.excluded.name, "source": "csv", "updated_at": now},
+        ))
+    db.flush()
+    recompute_tenant(db, tid, _tenant_settings(db, tid), now)
+
+    job.status = "success"
+    job.stats_json = {
+        "rows": len(rows), "inserted": inserted, "updated": updated, "skipped": 0,
+        "errors": len(errors), "bytes": len(content),
+    }
     db.commit()
-    return {"ok": True, "import_id": job.id, "message": "CSV customers parser landing next; file accepted"}
+    return {
+        "ok": True, "import_id": job.id, "inserted": inserted, "updated": updated,
+        "skipped": 0, "errors": errors[:MAX_CSV_ERRORS],
+    }
 
 
 @router.post("/data/csv/events")
@@ -214,8 +316,73 @@ async def upload_events_csv(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    content = await file.read()
-    job = ImportJob(tenant_id=user.tenant_id, type="csv_events", status="pending", stats_json={"bytes": len(content)})
+    tid = user.tenant_id
+    job = ImportJob(tenant_id=tid, type="csv_events", status="pending")
     db.add(job)
+    db.flush()
+
+    content = await file.read(MAX_CSV_BYTES + 1)
+    if len(content) > MAX_CSV_BYTES:
+        return _failed_csv_import(db, job, 413, "CSV 文件不能超过 10MB", "CSV_FILE_TOO_LARGE", len(content))
+    try:
+        rows = _parse_csv_rows(content, ("external_customer_id", "event_type", "occurred_at"))
+    except CsvFormatError as exc:
+        return _failed_csv_import(db, job, 400, exc.detail, exc.code, len(content))
+
+    now = utcnow()
+    errors = []
+    event_rows = []
+    id_by_external = dict(db.execute(
+        select(Customer.external_id, Customer.id).where(Customer.tenant_id == tid)
+    ).all())
+    for line, row in rows:
+        if None in row:
+            errors.append({"line": line, "reason": "该行的列数多于表头"})
+            continue
+        external_id = (row.get("external_customer_id") or "").strip()
+        event_type = (row.get("event_type") or "").strip()
+        occurred_at_value = (row.get("occurred_at") or "").strip()
+        feature_key = (row.get("feature_key") or "").strip() or None
+        if not external_id:
+            errors.append({"line": line, "reason": "external_customer_id 不能为空"})
+            continue
+        customer_id = id_by_external.get(external_id)
+        if not customer_id:
+            errors.append({"line": line, "reason": f"客户不存在：{external_id}"})
+            continue
+        if event_type not in CSV_EVENT_TYPES:
+            errors.append({"line": line, "reason": f"未知事件类型：{event_type or '（空）'}"})
+            continue
+        if not occurred_at_value:
+            errors.append({"line": line, "reason": "occurred_at 不能为空"})
+            continue
+        try:
+            occurred_at = parse_ts(occurred_at_value)
+        except ValueError:
+            errors.append({"line": line, "reason": f"时间格式无效：{occurred_at_value}"})
+            continue
+        event_rows.append({
+            "id": _uuid(), "tenant_id": tid, "customer_id": customer_id, "event_type": event_type,
+            "feature_key": feature_key, "occurred_at": occurred_at, "raw_payload": dict(row), "created_at": now,
+        })
+
+    inserted = 0
+    if event_rows:
+        result = db.execute(sqlite_insert(Event).values(event_rows).on_conflict_do_nothing(
+            index_elements=["tenant_id", "customer_id", "event_type", "occurred_at"]
+        ))
+        inserted = result.rowcount or 0
+    skipped = len(event_rows) - inserted
+    db.flush()
+    recompute_tenant(db, tid, _tenant_settings(db, tid), now)
+
+    job.status = "success"
+    job.stats_json = {
+        "rows": len(rows), "inserted": inserted, "updated": 0, "skipped": skipped,
+        "errors": len(errors), "bytes": len(content),
+    }
     db.commit()
-    return {"ok": True, "import_id": job.id, "message": "CSV events parser landing next; file accepted"}
+    return {
+        "ok": True, "import_id": job.id, "inserted": inserted, "skipped": skipped,
+        "errors": errors[:MAX_CSV_ERRORS],
+    }
