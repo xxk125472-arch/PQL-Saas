@@ -147,7 +147,7 @@ for i in range(1, 13):
     )
 
 for i in range(1, 16):
-    b = 4 + i * 0.4
+    b = 1 + i * 0.3  # last active <=5.5d, stays under 7d risk
     CUSTOMERS.append(
         (
             f"CUST-FV-{i:02d}",
@@ -164,7 +164,7 @@ for i in range(1, 16):
 # reuse: one active day in window (reuse day), last_active ~2-5 days
 for i in range(1, 16):
     reuse_day = 2 + (i % 4)  # 2..5 days ago
-    fv_day = reuse_day + 5
+    fv_day = 16 + (i % 4)  # outside 14d window -> only 1 active day in window
     ins_day = fv_day + 2
     CUSTOMERS.append(
         (

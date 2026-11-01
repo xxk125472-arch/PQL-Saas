@@ -202,3 +202,47 @@ euse（不以「窗内任意活跃」直接抬升）
 - [ ] 错误体 {detail}（PRD 写 {detail, code}，code 缺失记 P2 待对齐）
 - [ ] 登出为客户端丢 token：需确认旧 token 再调业务 API 是否仍 200（若是，PRD 6.1「登出后 401」不满足，记 P1）
 - [ ] 契约标「下一切片」的项（CSV 解析、飞书客户端、LLM 网关、llm/test）未完成前只测路由存在，不判失败
+
+---
+
+## 16. 前端视觉与交互（老板 2026-11-01 指示）
+
+模板依据（老板 2026-11-01 拍板）：awesome-design-md 的 design-md/vercel/DESIGN.md；组件库 shadcn/ui + Tailwind + Geist
+
+- [ ] 未使用 Ant Design 默认样式；按钮/卡片/表格/抽屉/Toast 均为 shadcn 组件并按 Vercel 规范调参
+- [ ] 浅色底 #fafafa、暗色底 #171717；1px 细线分隔；标题字重 ≤600；单一黑色主按钮
+- [ ] 彩色渐变只出现在登录前页面，登录后不出现
+
+- [ ] 视觉与选定模板一致，无明显自由发挥（配色、字体、间距、圆角、组件形态逐项对照）
+- [ ] 未登录态（登录/注册页）有转场或强渲染特效；首屏不卡顿，低配机可降级
+- [ ] 登录后为企业官网风格：清爽、干净
+- [ ] 主题三选一：浅色 / 暗色 / 跟随系统；切换即时生效，刷新后保持；跟随系统时随 OS 切换
+- [ ] 两种主题下文字对比度可读，图表/漏斗/Tag 颜色都适配
+- [ ] 组件交互有动效（hover、Drawer、Toast、页面切换），不生硬、不塑料感；支持 prefers-reduced-motion 降级
+
+---
+
+
+### 16.1 老板追加验收（2026-11-01）
+
+- [ ] **全中文**：按钮、菜单、表头、空态、错误提示、Toast、日期格式都用中文；只有代码字段名和品牌名可以保留英文
+- [ ] **禁止廉价毛玻璃**：不用大面积 backdrop-filter blur 和半透明玻璃卡片
+- [ ] **性能普适**：登录页 WebGL 渐变在集显或低配机上 CPU/GPU 占用不能明显飙高，滚动要流畅（DevTools Performance 抽查帧率接近 60fps）；WebGL 不可用或开启 reduced-motion 时退化成静态渐变
+- [ ] WebGL 只在登录前运行，进系统后释放掉，不在后台持续渲染
+- [ ] 动效高级、克制、不晃眼：没有闪烁、大幅缩放或长时间循环动画，单次过渡不超过约 300ms（以 UI-IA 第 7 节为准）
+- [ ] 抽查 Lighthouse 性能分（本地生产构建）不低于 85
+
+---
+
+## 17. SQL 数据层（老板定：优先做，PRD 第 9 节）
+
+- [ ] 8 张表齐全：tenants / users / customers / events / scores / imports / analysis_runs / settings，字段与 PRD 9.1–9.8 一致
+- [ ] 业务表都有 tenant_id 外键；settings.tenant_id 唯一
+- [ ] users：email、username 非空时全局唯一，两者至少一个非空；只存 password_hash
+- [ ] customers：(tenant_id, external_id) 唯一；source 取值限 synthetic/csv/feishu/manual
+- [ ] events：飞书去重键 (tenant_id, customer_id, event_type, occurred_at)，有唯一约束或 upsert
+- [ ] 时间统一按 UTC 存
+- [ ] 迁移可重复执行：空库能建，已建库再跑不报错；data/*.db 不进 git
+- [ ] 常用查询有索引（tenant_id、customer_id、occurred_at）
+- [ ] 删除 synthetic 时只删 synthetic 客户及其 events/scores，不级联误删其他来源
+- [ ] 密钥字段（feishu_app_secret_enc、llm_api_key_enc）不明文落库或不进日志
