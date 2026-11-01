@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.core.db import Base
+from app.core.timeutil import utcnow
 
 
 def _uuid() -> str:
@@ -13,7 +14,7 @@ def _uuid() -> str:
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    return utcnow()
 
 
 class Tenant(Base):
@@ -23,7 +24,7 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
-    users = relationship("User", back_populates="tenant")
+    users = relationship("User", back_populates="tenant", passive_deletes=True)
 
 
 class User(Base):
@@ -34,7 +35,7 @@ class User(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
@@ -45,10 +46,14 @@ class User(Base):
 
 class Customer(Base):
     __tablename__ = "customers"
-    __table_args__ = (UniqueConstraint("tenant_id", "external_id", name="uq_customer_external"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_id", name="uq_customer_external"),
+        Index("ix_customers_tenant_stage", "tenant_id", "stage"),
+        Index("ix_customers_tenant_source", "tenant_id", "source"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     external_id: Mapped[str] = mapped_column(String(255))
     name: Mapped[str] = mapped_column(String(255))
     stage: Mapped[str] = mapped_column(String(64), default="new")
@@ -60,10 +65,14 @@ class Customer(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "customer_id", "event_type", "occurred_at", name="uq_event_dedup"),
+        Index("ix_events_tenant_customer_occurred", "tenant_id", "customer_id", "occurred_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
-    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), index=True)
     event_type: Mapped[str] = mapped_column(String(64))
     feature_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
@@ -76,8 +85,8 @@ class Score(Base):
     __table_args__ = (UniqueConstraint("tenant_id", "customer_id", name="uq_score_customer"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
-    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id", ondelete="CASCADE"), index=True)
     health_score: Mapped[int] = mapped_column(Integer, default=0)
     pql_score: Mapped[int] = mapped_column(Integer, default=0)
     is_pql: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -92,7 +101,7 @@ class ImportJob(Base):
     __tablename__ = "imports"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     type: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="pending")
     stats_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -104,7 +113,7 @@ class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     skill_id: Mapped[str] = mapped_column(String(64))
     params_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mode: Mapped[str] = mapped_column(String(32))
@@ -119,7 +128,7 @@ class TenantSettings(Base):
     __tablename__ = "settings"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), unique=True, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, index=True)
     health_weights: Mapped[dict] = mapped_column(JSON)
     pql_weights: Mapped[dict] = mapped_column(JSON)
     pql_threshold: Mapped[int] = mapped_column(Integer, default=70)

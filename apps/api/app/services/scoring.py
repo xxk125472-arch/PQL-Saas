@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from app.core.timeutil import silent_days, utcnow
+
 STAGE_PROGRESS = {
     "new": 10,
     "installed": 30,
@@ -63,7 +65,7 @@ def compute_health(
     weights: dict[str, float],
     now: datetime | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     parts = {
         "recency": recency_score(last_active_at, now),
         "frequency": frequency_score(event_count_14d),
@@ -83,7 +85,7 @@ def compute_pql(
     weights: dict[str, float],
     now: datetime | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     if stage in {"first_value", "reuse", "retention", "at_risk", "churned"}:
         activation = 100.0
     elif stage == "installed":
@@ -138,7 +140,7 @@ def derive_stage(
     active_dates_in_window: int | None = None,
 ) -> str:
     """Stage algorithm locked with 荀彧 METRICS-FIELDS.md §3.2."""
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     if not event_types:
         return "new"
 
@@ -149,7 +151,7 @@ def derive_stage(
     if reached_fv:
         if last_active_at is None:
             return "churned"
-        silent = (now - last_active_at).days
+        silent = silent_days(now, last_active_at)  # floor days
         # PRD/荀彧: silent_days > threshold
         if silent > silent_churn_days:
             return "churned"
