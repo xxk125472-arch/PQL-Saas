@@ -1,0 +1,22 @@
+{
+  "generated_at_utc": "2026-11-01T06:00:00Z",
+  "customer_count": 80,
+  "event_count": 273,
+  "intended_stage_distribution": {
+    "new": 8,
+    "installed": 12,
+    "first_value": 15,
+    "reuse": 15,
+    "retention": 12,
+    "at_risk": 10,
+    "churned": 8
+  },
+  "funnel_cumulative_from_events": {
+    "installed": 72,
+    "first_value": 60,
+    "reuse": 36
+  },
+  "funnel_retention_bar_prd": "count where current stage == retention",
+  "expected_retention_bar": 12,
+  "notes": "Stage engine should apply METRICS-FIELDS.md section 阶段判定补充；CSV 可直接给 /data/csv 上传，也可作合成种子对照。"
+}
