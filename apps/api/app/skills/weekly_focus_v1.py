@@ -165,7 +165,7 @@ def build_rules_report(facts: dict[str, Any]) -> str:
         return "—" if value is None else f"{value}%"
 
     lines = [
-        "> Banner：当前为规则回退，未调用 LLM。",
+        "> 提示：当前为规则回退，未调用 LLM。",
         "",
         "# 本周运营焦点",
         "",

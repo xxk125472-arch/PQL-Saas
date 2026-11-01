@@ -116,7 +116,7 @@ def test_config_encrypts_secret_and_connection_reads_one_page(
     set_env_config(monkeypatch)
     headers = register(client, "feishu-config@example.com")
     saved = save_config(client, headers)
-    assert saved.json()["app_secret_masked"] == "****"
+    assert saved.json()["app_secret_masked"] == f"****{SECRET[-4:]}"
     assert SECRET not in saved.text
 
     user = db_session.query(User).filter(User.email == "feishu-config@example.com").one()
@@ -148,20 +148,59 @@ def test_config_encrypts_secret_and_connection_reads_one_page(
     with caplog.at_level(logging.DEBUG):
         tested = client.post("/api/v1/integrations/feishu/test", headers=headers)
         fetched = client.get("/api/v1/integrations/feishu/config", headers=headers)
+        updated = client.put(
+            "/api/v1/integrations/feishu/config",
+            json={**CONFIG, "app_secret": "****do-not-change"},
+            headers=headers,
+        )
 
     assert tested.status_code == 200, tested.text
     assert tested.json() == {"ok": True, "message": "连接成功，已读取客户表 1 条记录", "records_read": 1}
     assert fetched.status_code == 200
     assert fetched.json()["source"] == "database"
     assert fetched.json()["app_id"] == "cli_test_app"
+    assert fetched.json()["app_secret_masked"] == f"****{SECRET[-4:]}"
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["app_secret_masked"] == f"****{SECRET[-4:]}"
+    db_session.refresh(settings)
+    assert decrypt_secret(settings.feishu_app_secret_enc) == SECRET
     assert SECRET not in tested.text
     assert SECRET not in fetched.text
+    assert SECRET not in updated.text
     assert SECRET not in caplog.text
     assert ENV_SECRET not in tested.text
     assert ENV_SECRET not in fetched.text
     assert ENV_SECRET not in caplog.text
     assert sum("/records/search" in url for _, url, _ in calls) == 1
     assert all(call[2].get("params", {}).get("page_token") != "must-not-be-requested" for call in calls)
+
+
+def test_short_secret_is_fully_masked(
+    db_session: Session,
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+):
+    short_secret = "abcd"
+    headers = register(client, "feishu-short-secret@example.com")
+
+    with caplog.at_level(logging.DEBUG):
+        saved = client.put(
+            "/api/v1/integrations/feishu/config",
+            json={**CONFIG, "app_secret": short_secret},
+            headers=headers,
+        )
+        fetched = client.get("/api/v1/integrations/feishu/config", headers=headers)
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["app_secret_masked"] == "****"
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["app_secret_masked"] == "****"
+    user = db_session.query(User).filter(User.email == "feishu-short-secret@example.com").one()
+    settings = db_session.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).one()
+    assert decrypt_secret(settings.feishu_app_secret_enc) == short_secret
+    assert short_secret not in saved.text
+    assert short_secret not in fetched.text
+    assert short_secret not in caplog.text
 
 
 def test_env_config_fallback_supports_get_test_and_sync(
@@ -212,7 +251,7 @@ def test_env_config_fallback_supports_get_test_and_sync(
     assert fetched.status_code == 200, fetched.text
     assert fetched.json() == {
         "app_id": "cli_env_app",
-        "app_secret_masked": "****",
+        "app_secret_masked": f"****{ENV_SECRET[-4:]}",
         "app_token": "base_env_token",
         "customers_table_id": "tbl_env_customers",
         "events_table_id": "tbl_env_events",

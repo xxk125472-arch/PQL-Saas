@@ -97,7 +97,7 @@ def test_rules_only_without_key_has_six_sections_and_history(client: TestClient,
     assert payload["error"] is None
     assert payload["latency_ms"] >= 0
     assert_six_sections(payload["report_md"])
-    assert "当前为规则回退" in payload["report_md"]
+    assert "> 提示：当前为规则回退，未调用 LLM。" in payload["report_md"]
 
     history = client.get("/api/v1/analysis/runs", headers=headers)
     assert history.status_code == 200

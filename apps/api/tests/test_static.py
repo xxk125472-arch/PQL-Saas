@@ -25,7 +25,8 @@ def test_static_files_and_spa_fallback(tmp_path, monkeypatch):
 
         api_response = client.get("/api/v1/not-found")
         assert api_response.status_code == 404
-        assert api_response.json() == {"detail": "Not Found"}
+        assert api_response.json()["code"] == "NOT_FOUND"
+        assert api_response.json()["detail"] == "资源不存在"
 
         health_response = client.get("/health")
         assert health_response.status_code == 200

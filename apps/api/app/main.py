@@ -1,10 +1,13 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -18,6 +21,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+HTTP_ERROR_DETAILS = {
+    401: ("未登录或登录已过期", "UNAUTHORIZED"),
+    403: ("无权访问", "FORBIDDEN"),
+    404: ("资源不存在", "NOT_FOUND"),
+    405: ("请求方法不被允许", "METHOD_NOT_ALLOWED"),
+}
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(exc.detail), headers=exc.headers)
+
+    detail, code = HTTP_ERROR_DETAILS.get(exc.status_code, ("请求失败", "HTTP_ERROR"))
+    if isinstance(exc.detail, str) and any("\u4e00" <= char <= "\u9fff" for char in exc.detail):
+        detail = exc.detail
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail, "code": code}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "请求参数校验失败",
+            "code": "VALIDATION_ERROR",
+            "errors": jsonable_encoder(exc.errors()),
+        },
+    )
 
 
 @app.on_event("startup")

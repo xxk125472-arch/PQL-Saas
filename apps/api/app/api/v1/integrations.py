@@ -60,11 +60,17 @@ def _stored_config(settings: TenantSettings) -> dict[str, Any]:
     return stored
 
 
+def _mask_secret(secret: str | None) -> str:
+    if not secret or len(secret) <= 4:
+        return "****"
+    return f"****{secret[-4:]}"
+
+
 def _config_response(config: dict[str, Any]) -> FeishuConfigWithSourceResponse:
     stored = config["stored"]
     return FeishuConfigWithSourceResponse(
         app_id=config["app_id"],
-        app_secret_masked="****",
+        app_secret_masked=_mask_secret(config.get("app_secret")),
         app_token=stored["app_token"],
         customers_table_id=stored["customers_table_id"],
         events_table_id=stored["events_table_id"],
@@ -77,7 +83,7 @@ def _resolved_config(settings: TenantSettings) -> dict[str, Any]:
     if settings.feishu_app_id or settings.feishu_app_secret_enc or settings.feishu_mapping_json:
         return {
             "app_id": settings.feishu_app_id or "",
-            "app_secret": None,
+            "app_secret": _secret(settings),
             "stored": _stored_config(settings),
             "source": "database",
         }
@@ -187,7 +193,7 @@ def put_feishu_config(
     try:
         settings = _settings(db, user.tenant_id)
         mapping = _mapping(body.field_mapping)
-        if body.app_secret is not None:
+        if body.app_secret is not None and not body.app_secret.startswith("****"):
             if not body.app_secret:
                 raise FeishuConfigError("App Secret 不能为空", "FEISHU_SECRET_EMPTY")
             settings.feishu_app_secret_enc = encrypt_secret(body.app_secret)
@@ -204,6 +210,7 @@ def put_feishu_config(
         db.commit()
         return _config_response({
             "app_id": settings.feishu_app_id or "",
+            "app_secret": _secret(settings),
             "stored": stored,
             "source": "database",
         })
