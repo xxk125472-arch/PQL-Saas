@@ -44,6 +44,13 @@ class User(Base):
     tenant = relationship("Tenant", back_populates="users")
 
 
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(36), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class Customer(Base):
     __tablename__ = "customers"
     __table_args__ = (

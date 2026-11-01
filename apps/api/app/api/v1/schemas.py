@@ -151,6 +151,7 @@ class FeishuConfigUpdate(BaseModel):
 
 
 class FeishuConfigResponse(BaseModel):
+    configured: bool
     app_id: str
     app_secret_masked: str | None = None
     app_token: str

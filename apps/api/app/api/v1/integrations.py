@@ -69,6 +69,7 @@ def _mask_secret(secret: str | None) -> str:
 def _config_response(config: dict[str, Any]) -> FeishuConfigWithSourceResponse:
     stored = config["stored"]
     return FeishuConfigWithSourceResponse(
+        configured=True,
         app_id=config["app_id"],
         app_secret_masked=_mask_secret(config.get("app_secret")),
         app_token=stored["app_token"],
@@ -179,6 +180,18 @@ def _failed_sync(db: Session, job_id: str, exc: FeishuError, stats: dict[str, in
 def get_feishu_config(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         settings = _settings(db, user.tenant_id)
+        if not (settings.feishu_app_id or settings.feishu_app_secret_enc or settings.feishu_mapping_json):
+            if load_env_config() is None:
+                return FeishuConfigWithSourceResponse(
+                    configured=False,
+                    app_id="",
+                    app_secret_masked=None,
+                    app_token="",
+                    customers_table_id="",
+                    events_table_id="",
+                    field_mapping={},
+                    source="none",
+                )
         return _config_response(_resolved_config(settings))
     except FeishuConfigError as exc:
         return _error(400, exc.detail, exc.code)

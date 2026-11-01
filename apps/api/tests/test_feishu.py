@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings as app_settings
 from app.core.db import Base, get_db
 from app.main import app
 from app.models import Customer, Event, ImportJob, TenantSettings, User
@@ -250,6 +251,7 @@ def test_env_config_fallback_supports_get_test_and_sync(
 
     assert fetched.status_code == 200, fetched.text
     assert fetched.json() == {
+        "configured": True,
         "app_id": "cli_env_app",
         "app_secret_masked": f"****{ENV_SECRET[-4:]}",
         "app_token": "base_env_token",
@@ -401,6 +403,37 @@ def test_feishu_timeout_is_chinese(
     assert response.status_code == 504
     assert response.json() == {"detail": "连接飞书超时，请稍后重试", "code": "FEISHU_TIMEOUT"}
     assert SECRET not in response.text
+
+
+def test_config_without_credentials_returns_empty_config_but_actions_fail(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    for name in ENV_CONFIG:
+        monkeypatch.setenv(name, "")
+        monkeypatch.setattr(app_settings, name.lower(), None)
+    headers = register(client, "feishu-empty@example.com")
+
+    response = client.get("/api/v1/integrations/feishu/config", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "configured": False,
+        "app_id": "",
+        "app_secret_masked": None,
+        "app_token": "",
+        "customers_table_id": "",
+        "events_table_id": "",
+        "field_mapping": {},
+        "source": "none",
+    }
+    for action in ("test", "sync"):
+        action_response = client.post(f"/api/v1/integrations/feishu/{action}", headers=headers)
+        assert action_response.status_code == 400
+        assert action_response.json() == {
+            "detail": "请先配置飞书 App ID 和 App Secret",
+            "code": "FEISHU_CREDENTIALS_MISSING",
+        }
 
 
 def test_sync_without_config_returns_unified_chinese_error(client: TestClient):

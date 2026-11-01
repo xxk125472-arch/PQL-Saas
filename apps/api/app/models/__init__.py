@@ -3,6 +3,7 @@ from app.models.entities import (
     Customer,
     Event,
     ImportJob,
+    RevokedToken,
     Score,
     Tenant,
     TenantSettings,
@@ -16,6 +17,7 @@ __all__ = [
     "Event",
     "Score",
     "ImportJob",
+    "RevokedToken",
     "AnalysisRun",
     "TenantSettings",
 ]

@@ -1,11 +1,14 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import bearer, get_current_user
 from app.api.v1.schemas import LoginRequest, MeResponse, RegisterRequest, TokenResponse
 from app.core.db import get_db
-from app.core.security import create_access_token, hash_password, verify_password
-from app.models import Tenant, TenantSettings, User
+from app.core.security import create_access_token, hash_password, safe_decode, verify_password
+from app.models import RevokedToken, Tenant, TenantSettings, User
 from app.services.defaults import DEFAULT_HEALTH_WEIGHTS, DEFAULT_PQL_WEIGHTS
 
 router = APIRouter(tags=["auth"])
@@ -65,8 +68,19 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
 
 
 @router.post("/auth/logout")
-def logout(user: User = Depends(get_current_user)) -> dict:
-    # Stateless JWT: client discards token.
+def logout(
+    creds: HTTPAuthorizationCredentials = Depends(bearer),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    payload = safe_decode(creds.credentials)
+    db.add(
+        RevokedToken(
+            jti=payload["jti"],
+            expires_at=datetime.fromtimestamp(payload["exp"], timezone.utc).replace(tzinfo=None),
+        )
+    )
+    db.commit()
     return {"ok": True, "user_id": user.id}
 
 

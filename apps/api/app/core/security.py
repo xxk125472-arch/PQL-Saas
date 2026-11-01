@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -26,6 +27,7 @@ def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> st
     }
     if extra:
         payload.update(extra)
+    payload["jti"] = str(uuid.uuid4())
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
