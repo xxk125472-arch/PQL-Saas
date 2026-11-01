@@ -1,5 +1,281 @@
-* { box-sizing: border-box; }
-html, body, #root { margin: 0; min-height: 100%; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
-a { color: #2563eb; }
-button { cursor: pointer; }
-input { font: inherit; }
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens — DESIGN.md (Vercel) + UI-IA §7.
+ * Light values come straight from DESIGN.md; dark is the documented
+ * polarity flip (UI-IA §7.1). Components only reference these variables.
+ */
+:root {
+  --radius: 6px;
+
+  --background: #fafafa; /* canvas-soft: page */
+  --surface: #ffffff; /* canvas: cards, dialogs */
+  --surface-2: #f5f5f5; /* canvas-soft-2: inset, hover */
+  --foreground: #171717; /* ink */
+  --body: #4d4d4d;
+  --mute: #888888;
+  --border: #ebebeb; /* hairline */
+  --border-strong: #a1a1a1;
+
+  --primary: #171717;
+  --primary-foreground: #ffffff;
+  --primary-hover: #383838;
+  --link: #0070f3;
+  --ring: rgb(0 112 243 / 45%);
+
+  --destructive: #ee0000;
+  --destructive-deep: #c50000;
+  --destructive-soft: #f7d4d6;
+  --warning: #f5a623;
+  --warning-deep: #ab570a;
+  --warning-soft: #ffefcf;
+
+  /* Stage / status hues (DESIGN.md semantic + gradient stops, used as low-saturation tags) */
+  --hue-gray: #4d4d4d;
+  --hue-blue: #0761d1;
+  --hue-teal: #00807c;
+  --hue-violet: #7928ca;
+  --hue-mint: #1a8f74;
+  --hue-amber: #ab570a;
+  --hue-red: #c50000;
+  --hue-pink: #d6006b;
+  --tag-alpha: 10%;
+
+  --scrim: rgb(0 0 0 / 30%);
+
+  /* Stacked elevation (DESIGN.md Level 1–5) */
+  --ring-hairline: 0 0 0 1px rgb(0 0 0 / 8%);
+  --shadow-1: var(--ring-hairline);
+  --shadow-2: 0 1px 1px rgb(0 0 0 / 2%), 0 2px 2px rgb(0 0 0 / 4%), var(--ring-hairline);
+  --shadow-3: 0 2px 2px rgb(0 0 0 / 4%), 0 8px 8px -8px rgb(0 0 0 / 4%), var(--ring-hairline);
+  --shadow-4: 0 2px 2px rgb(0 0 0 / 4%), 0 8px 16px -4px rgb(0 0 0 / 4%), var(--ring-hairline);
+  --shadow-5: 0 1px 1px rgb(0 0 0 / 2%), 0 8px 16px -4px rgb(0 0 0 / 4%), 0 24px 32px -8px rgb(0 0 0 / 6%),
+    var(--ring-hairline);
+
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.dark {
+  --background: #171717;
+  --surface: #1f1f1f;
+  --surface-2: #262626;
+  --foreground: #ededed;
+  --body: #a1a1a1;
+  --mute: #8f8f8f;
+  --border: #2e2e2e;
+  --border-strong: #5c5c5c;
+
+  --primary: #ededed;
+  --primary-foreground: #171717;
+  --primary-hover: #ffffff;
+  --link: #3b9eff;
+  --ring: rgb(59 158 255 / 50%);
+
+  --destructive: #ff4d4d;
+  --destructive-deep: #ff6b6b;
+  --destructive-soft: rgb(255 77 77 / 14%);
+  --warning: #f5a623;
+  --warning-deep: #f5b54a;
+  --warning-soft: rgb(245 166 35 / 14%);
+
+  --hue-gray: #a1a1a1;
+  --hue-blue: #52a8ff;
+  --hue-teal: #00dfd8;
+  --hue-violet: #b78af0;
+  --hue-mint: #50e3c2;
+  --hue-amber: #f5b54a;
+  --hue-red: #ff6b6b;
+  --hue-pink: #ff5ca8;
+  --tag-alpha: 16%;
+
+  --scrim: rgb(0 0 0 / 55%);
+
+  --ring-hairline: 0 0 0 1px rgb(255 255 255 / 8%);
+  --shadow-2: 0 1px 1px rgb(0 0 0 / 20%), 0 2px 2px rgb(0 0 0 / 24%), var(--ring-hairline);
+  --shadow-3: 0 2px 2px rgb(0 0 0 / 24%), 0 8px 8px -8px rgb(0 0 0 / 24%), var(--ring-hairline);
+  --shadow-4: 0 2px 2px rgb(0 0 0 / 24%), 0 8px 16px -4px rgb(0 0 0 / 30%), var(--ring-hairline);
+  --shadow-5: 0 1px 1px rgb(0 0 0 / 20%), 0 8px 16px -4px rgb(0 0 0 / 30%), 0 24px 32px -8px rgb(0 0 0 / 40%),
+    var(--ring-hairline);
+}
+
+@theme inline {
+  --font-sans: 'Geist Variable', 'Geist', Inter, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, 'PingFang SC',
+    'Microsoft YaHei', monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-body: var(--body);
+  --color-mute: var(--mute);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-link: var(--link);
+  --color-destructive: var(--destructive);
+  --color-destructive-deep: var(--destructive-deep);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-warning: var(--warning);
+  --color-warning-deep: var(--warning-deep);
+  --color-warning-soft: var(--warning-soft);
+  /* shadcn aliases */
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--body);
+  --color-accent: var(--surface-2);
+  --color-accent-foreground: var(--foreground);
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--foreground);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-l1: var(--shadow-1);
+  --shadow-l2: var(--shadow-2);
+  --shadow-l3: var(--shadow-3);
+  --shadow-l4: var(--shadow-4);
+  --shadow-l5: var(--shadow-5);
+
+  --ease-out-soft: var(--ease-out);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 14px;
+    line-height: 20px;
+    font-feature-settings: 'ss01', 'ss02';
+  }
+
+  ::selection {
+    background: #171717;
+    color: #f2f2f2;
+  }
+
+  .dark ::selection {
+    background: #ededed;
+    color: #171717;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+}
+
+/* Headings: DESIGN.md negative tracking, capped at -0.5px for CJK (UI-IA §7.6) */
+@utility heading {
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Motion (transform / opacity only, 150–300ms) ---------- */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@utility animate-page-in {
+  animation: page-in 200ms var(--ease-out) both;
+}
+
+@utility animate-fade-in {
+  animation: fade-in 200ms ease-out both;
+}
+
+@utility animate-enter-up {
+  animation: enter-up 300ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}

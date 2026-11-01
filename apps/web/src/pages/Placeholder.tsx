@@ -1,17 +1,28 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { Page, PageHeader } from '@/layout/AppShell'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/EmptyState'
 
-type Props = { title: string; hint?: string }
+type Props = { title: string; description?: string; hint: string; icon?: ReactNode }
 
-export function Placeholder({ title, hint }: Props) {
+export function Placeholder({ title, description, hint, icon }: Props) {
   return (
-    <div style={{ padding: 24 }}>
-      <h1 style={{ margin: '0 0 8px' }}>{title}</h1>
-      <p style={{ color: '#666', marginBottom: 16 }}>{hint ?? 'Day1 占位页，后续对接 API。'}</p>
-      <p>
-        <Link to="/overview">Overview</Link>
-        {' · '}
-        <Link to="/login">Login</Link>
-      </p>
-    </div>
+    <Page>
+      <PageHeader title={title} description={description} />
+      <Card>
+        <EmptyState
+          icon={icon}
+          title="即将上线"
+          description={hint}
+          actions={
+            <Button variant="outline" asChild>
+              <Link to="/overview">返回总览</Link>
+            </Button>
+          }
+        />
+      </Card>
+    </Page>
   )
 }
