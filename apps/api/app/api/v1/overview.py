@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -33,7 +33,11 @@ def funnel(user: User = Depends(get_current_user), db: Session = Depends(get_db)
     )
     customer_total = db.query(func.count(Customer.id)).filter(Customer.tenant_id == tid).scalar() or 0
     pql_count = (
-        db.query(func.count(Score.id)).filter(Score.tenant_id == tid, Score.is_pql.is_(True)).scalar() or 0
+        db.query(func.count(Customer.id))
+        .join(Score, and_(Score.tenant_id == tid, Score.customer_id == Customer.id))
+        .filter(Customer.tenant_id == tid, Score.is_pql.is_(True))
+        .scalar()
+        or 0
     )
     at_risk_count = (
         db.query(func.count(Customer.id)).filter(Customer.tenant_id == tid, Customer.stage == "at_risk").scalar()

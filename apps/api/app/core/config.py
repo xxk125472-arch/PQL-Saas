@@ -17,9 +17,14 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ]
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_app_token: str | None = None
+    feishu_customers_table_id: str | None = None
+    feishu_events_table_id: str | None = None
 
     class Config:
-        env_file = ".env"
+        env_file = REPO_ROOT / ".env"
         extra = "ignore"
 
 

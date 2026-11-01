@@ -44,6 +44,7 @@ class CustomerListItem(BaseModel):
     external_id: str
     name: str
     stage: str
+    source: str
     health_score: int
     pql_score: int
     is_pql: bool
@@ -91,6 +92,21 @@ class SettingsUpdate(BaseModel):
     llm_timeout_sec: int | None = None
 
 
+class LLMSettingsUpdate(BaseModel):
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    timeout_sec: int | None = None
+
+
+class LLMSettingsResponse(BaseModel):
+    base_url: str | None = None
+    model: str | None = None
+    timeout_sec: int = 30
+    api_key_masked: str | None = None
+    has_api_key: bool = False
+
+
 class AnalysisRunCreate(BaseModel):
     skill_id: str = "weekly_focus_v1"
     params: dict[str, Any] = Field(default_factory=dict)
@@ -113,3 +129,51 @@ class SkillItem(BaseModel):
     name: str
     description: str
     enabled: bool = True
+
+
+class FeishuFieldMapping(BaseModel):
+    external_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    external_customer_id: str | None = None
+    event_type: str = Field(..., min_length=1)
+    occurred_at: str = Field(..., min_length=1)
+    feature_key: str | None = None
+    event_type_values: dict[str, str] = Field(default_factory=dict)
+
+
+class FeishuConfigUpdate(BaseModel):
+    app_id: str = Field(..., min_length=1)
+    app_secret: str | None = None
+    app_token: str = Field(..., min_length=1)
+    customers_table_id: str = Field(..., min_length=1)
+    events_table_id: str = Field(..., min_length=1)
+    field_mapping: FeishuFieldMapping
+
+
+class FeishuConfigResponse(BaseModel):
+    app_id: str
+    app_secret_masked: str | None = None
+    app_token: str
+    customers_table_id: str
+    events_table_id: str
+    field_mapping: dict[str, Any]
+
+
+class FeishuTestResponse(BaseModel):
+    ok: bool
+    message: str
+    records_read: int
+
+
+class FeishuSyncResponse(BaseModel):
+    ok: bool
+    import_id: str
+    message: str
+    customers_read: int
+    customers_inserted: int
+    customers_updated: int
+    events_read: int
+    events_inserted: int
+    events_skipped: int
+    customers_recomputed: int
+    errors: list[dict[str, Any]]

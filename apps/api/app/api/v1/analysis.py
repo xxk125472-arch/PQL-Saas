@@ -1,14 +1,21 @@
-from datetime import datetime
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.v1.schemas import AnalysisRunCreate, AnalysisRunResponse, SkillItem
 from app.core.db import get_db
-from app.models import AnalysisRun, Customer, Score, TenantSettings, User
-from app.skills.weekly_focus_v1 import build_rules_report
+from app.models import AnalysisRun, TenantSettings, User
+from app.services import llm
+from app.skills.weekly_focus_v1 import (
+    build_facts,
+    build_llm_messages,
+    build_rules_report,
+    normalize_params,
+    parse_llm_report,
+)
 
 router = APIRouter(tags=["analysis"])
 
@@ -22,43 +29,11 @@ OFFICIAL_SKILLS = [
 ]
 
 
-@router.get("/analysis/skills", response_model=list[SkillItem])
-def list_skills(user: User = Depends(get_current_user)) -> list[SkillItem]:
-    return OFFICIAL_SKILLS
+def _error(status_code: int, detail: str, code: str) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": detail, "code": code})
 
 
-@router.post("/analysis/runs", response_model=AnalysisRunResponse)
-def create_run(
-    body: AnalysisRunCreate,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> AnalysisRunResponse:
-    if body.skill_id != "weekly_focus_v1":
-        raise HTTPException(status_code=400, detail="skill not allowed")
-    settings = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
-    start = time.time()
-    mode = "llm" if settings and settings.llm_api_key_enc else "rules_only"
-    # V1 Day1: always rules_only until LLM gateway lands; if key present still rules for now with note
-    report = build_rules_report(db, user.tenant_id, body.params or {})
-    if mode == "llm":
-        # hard gateway placeholder — keep rules until httpx chat completion is wired
-        mode = "rules_only"
-        report = "> Banner: LLM 网关下一迭代接入；本次仍为规则回退。\n\n" + report
-    else:
-        report = "> Banner: 当前为规则回退，未调用 LLM。\n\n" + report
-
-    run = AnalysisRun(
-        tenant_id=user.tenant_id,
-        skill_id=body.skill_id,
-        params_json=body.params or {},
-        mode=mode,
-        status="success",
-        report_md=report,
-        latency_ms=int((time.time() - start) * 1000),
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
+def _to_response(run: AnalysisRun) -> AnalysisRunResponse:
     return AnalysisRunResponse(
         id=run.id,
         skill_id=run.skill_id,
@@ -72,8 +47,65 @@ def create_run(
     )
 
 
+@router.get("/analysis/skills", response_model=list[SkillItem])
+def list_skills(user: User = Depends(get_current_user)) -> list[SkillItem]:
+    return OFFICIAL_SKILLS
+
+
+@router.post("/analysis/runs", response_model=AnalysisRunResponse)
+def create_run(
+    body: AnalysisRunCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse | JSONResponse:
+    if body.skill_id != "weekly_focus_v1":
+        return _error(400, "仅支持官方 Skill weekly_focus_v1。", "skill_not_allowed")
+    try:
+        params = normalize_params(body.params or {})
+    except ValueError as exc:
+        return _error(400, str(exc), "invalid_analysis_params")
+
+    start = time.perf_counter()
+    settings = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
+    facts = build_facts(db, user.tenant_id, params)
+    report = build_rules_report(facts)
+    mode = "rules_only"
+    run_error = None
+
+    if settings and settings.llm_api_key_enc:
+        if not llm.has_complete_config(settings):
+            run_error = "LLM 配置不完整，已回退规则报告。"
+        else:
+            try:
+                content = llm.chat_completion(settings, build_llm_messages(facts), json_mode=True)
+                report = parse_llm_report(content, facts)
+                mode = "llm"
+            except ValueError as exc:
+                run_error = f"parse_error：{exc}已回退规则报告。"
+            except llm.LLMError as exc:
+                run_error = f"{exc}已回退规则报告。"
+
+    run = AnalysisRun(
+        tenant_id=user.tenant_id,
+        skill_id=body.skill_id,
+        params_json=params,
+        mode=mode,
+        status="success",
+        report_md=report,
+        error=run_error,
+        latency_ms=int((time.perf_counter() - start) * 1000),
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return _to_response(run)
+
+
 @router.get("/analysis/runs", response_model=list[AnalysisRunResponse])
-def list_runs(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[AnalysisRunResponse]:
+def list_runs(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[AnalysisRunResponse]:
     rows = (
         db.query(AnalysisRun)
         .filter(AnalysisRun.tenant_id == user.tenant_id)
@@ -81,35 +113,20 @@ def list_runs(user: User = Depends(get_current_user), db: Session = Depends(get_
         .limit(20)
         .all()
     )
-    return [
-        AnalysisRunResponse(
-            id=r.id,
-            skill_id=r.skill_id,
-            params_json=r.params_json,
-            mode=r.mode,
-            status=r.status,
-            report_md=r.report_md,
-            error=r.error,
-            latency_ms=r.latency_ms,
-            created_at=r.created_at,
-        )
-        for r in rows
-    ]
+    return [_to_response(run) for run in rows]
 
 
 @router.get("/analysis/runs/{run_id}", response_model=AnalysisRunResponse)
-def get_run(run_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> AnalysisRunResponse:
-    r = db.query(AnalysisRun).filter(AnalysisRun.tenant_id == user.tenant_id, AnalysisRun.id == run_id).first()
-    if not r:
-        raise HTTPException(status_code=404, detail="run not found")
-    return AnalysisRunResponse(
-        id=r.id,
-        skill_id=r.skill_id,
-        params_json=r.params_json,
-        mode=r.mode,
-        status=r.status,
-        report_md=r.report_md,
-        error=r.error,
-        latency_ms=r.latency_ms,
-        created_at=r.created_at,
+def get_run(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnalysisRunResponse | JSONResponse:
+    run = (
+        db.query(AnalysisRun)
+        .filter(AnalysisRun.tenant_id == user.tenant_id, AnalysisRun.id == run_id)
+        .first()
     )
+    if not run:
+        return _error(404, "未找到该分析记录。", "analysis_run_not_found")
+    return _to_response(run)

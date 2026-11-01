@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import event, inspect
+from sqlalchemy.orm import Session
+
 from app.core.timeutil import silent_days, utcnow
+from app.models import Customer, Event, Score, TenantSettings
 
 STAGE_PROGRESS = {
     "new": 10,
@@ -17,14 +21,19 @@ STAGE_PROGRESS = {
     "churned": 15,
 }
 
-ACTION_PRIORITY = [
-    ("churned", "winback", "启动挽回：联系确认需求是否变化"),
-    ("at_risk", "reengage", "七日内触达：推送价值场景或成功案例"),
-]
+PQL_STAGES = {"first_value", "reuse", "retention"}
+SCORING_SETTINGS_FIELDS = {
+    "health_weights",
+    "pql_weights",
+    "pql_threshold",
+    "silent_risk_days",
+    "silent_churn_days",
+    "retention_window_days",
+}
 
 
-def _clamp(v: float) -> int:
-    return int(max(0, min(100, round(v))))
+def _clamp(v: float) -> float:
+    return round(max(0.0, min(100.0, v)), 2)
 
 
 def recency_score(last_active_at: datetime | None, now: datetime) -> float:
@@ -64,7 +73,7 @@ def compute_health(
     feature_count_14d: int | None,
     weights: dict[str, float],
     now: datetime | None = None,
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[float, dict[str, Any]]:
     now = now or utcnow()
     parts = {
         "recency": recency_score(last_active_at, now),
@@ -79,12 +88,12 @@ def compute_health(
 def compute_pql(
     *,
     stage: str,
-    health: int,
+    health: float,
     frequency: float,
     last_active_at: datetime | None,
     weights: dict[str, float],
     now: datetime | None = None,
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[float, dict[str, Any]]:
     now = now or utcnow()
     if stage in {"first_value", "reuse", "retention", "at_risk", "churned"}:
         activation = 100.0
@@ -93,9 +102,13 @@ def compute_pql(
     else:
         activation = 0.0
 
-    stage_eng = {"reuse": 75.0, "retention": 100.0}.get(stage, 40.0 if stage == "first_value" else 0.0)
-    engagement = (stage_eng + frequency) / 2.0
-    recency_boost = 100.0 if last_active_at and (now - last_active_at) <= timedelta(days=7) else 0.0
+    engagement = (float(STAGE_PROGRESS.get(stage, 10)) + frequency) / 2.0
+    seconds_since_active = (now - last_active_at).total_seconds() if last_active_at else None
+    recency_boost = (
+        100.0
+        if seconds_since_active is not None and 0 <= seconds_since_active <= timedelta(days=7).total_seconds()
+        else 0.0
+    )
     parts = {
         "activation": activation,
         "engagement": engagement,
@@ -109,8 +122,8 @@ def compute_pql(
 def suggest_action(
     *,
     stage: str,
-    pql_score: int,
-    health_score: int,
+    pql_score: float,
+    health_score: float,
     pql_threshold: int,
     has_events: bool,
 ) -> tuple[str, str]:
@@ -169,23 +182,92 @@ def derive_stage(
         return "installed"
     return "new"
 
-    reached_fv = "first_value" in event_types
-    reached_reuse = "reuse" in event_types
-    reached_install = "install" in event_types or reached_fv or reached_reuse
 
-    if reached_fv or reached_reuse:
-        if last_active_at is None:
-            return "churned"
-        silent = (now - last_active_at).days
-        if silent >= silent_churn_days:
-            return "churned"
-        if silent >= silent_risk_days:
-            return "at_risk"
-        if reached_reuse and last_active_at >= now - timedelta(days=retention_window_days):
-            return "retention"
-        if reached_reuse:
-            return "reuse"
-        return "first_value"
-    if reached_install:
-        return "installed"
-    return "new"
+def recalculate_tenant(
+    db: Session,
+    tenant_id: str,
+    settings: TenantSettings,
+    now: datetime | None = None,
+) -> int:
+    now = now or utcnow()
+    customers = db.query(Customer).filter(Customer.tenant_id == tenant_id).all()
+    for customer in customers:
+        events = (
+            db.query(Event)
+            .filter(Event.tenant_id == tenant_id, Event.customer_id == customer.id)
+            .all()
+        )
+        event_types = {e.event_type for e in events}
+        last_active = max((e.occurred_at for e in events), default=None)
+        active_dates = {
+            e.occurred_at.date()
+            for e in events
+            if 0 <= (now - e.occurred_at).days <= settings.retention_window_days
+        }
+        customer.stage = derive_stage(
+            event_types,
+            last_active,
+            silent_risk_days=settings.silent_risk_days,
+            silent_churn_days=settings.silent_churn_days,
+            retention_window_days=settings.retention_window_days,
+            now=now,
+            active_dates_in_window=len(active_dates),
+        )
+        customer.last_active_at = last_active
+        cutoff = now - timedelta(days=14)
+        recent = [e for e in events if e.occurred_at >= cutoff]
+        features = {e.feature_key for e in recent if e.feature_key}
+        health, health_breakdown = compute_health(
+            stage=customer.stage,
+            last_active_at=last_active,
+            event_count_14d=len(recent),
+            feature_count_14d=len(features) if features else (None if not recent else 0),
+            weights=settings.health_weights,
+            now=now,
+        )
+        pql, pql_breakdown = compute_pql(
+            stage=customer.stage,
+            health=health,
+            frequency=health_breakdown["frequency"],
+            last_active_at=last_active,
+            weights=settings.pql_weights,
+            now=now,
+        )
+        action, reason = suggest_action(
+            stage=customer.stage,
+            pql_score=pql,
+            health_score=health,
+            pql_threshold=settings.pql_threshold,
+            has_events=bool(events),
+        )
+        score = (
+            db.query(Score)
+            .filter(Score.tenant_id == tenant_id, Score.customer_id == customer.id)
+            .first()
+        )
+        if not score:
+            score = Score(tenant_id=tenant_id, customer_id=customer.id)
+            db.add(score)
+        score.health_score = health
+        score.pql_score = pql
+        score.is_pql = pql >= settings.pql_threshold and customer.stage in PQL_STAGES
+        score.health_breakdown = health_breakdown
+        score.pql_breakdown = pql_breakdown
+        score.suggested_action = action
+        score.action_reason = reason
+        score.calculated_at = now
+        customer.updated_at = now
+    return len(customers)
+
+
+@event.listens_for(Session, "before_commit")
+def _recalculate_after_scoring_settings_change(session: Session) -> None:
+    changed_settings = []
+    for obj in session.dirty:
+        if not isinstance(obj, TenantSettings):
+            continue
+        state = inspect(obj)
+        if any(state.attrs[field].history.has_changes() for field in SCORING_SETTINGS_FIELDS):
+            changed_settings.append(obj)
+    for settings in changed_settings:
+        recalculate_tenant(session, settings.tenant_id, settings)
