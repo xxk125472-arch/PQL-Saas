@@ -3,7 +3,7 @@
 
 用法：
   python scripts/data/validate_seed.py --selftest            # 内存库载入 data/sample，自证 manifest
-  python scripts/data/validate_seed.py --db data/app.db --tenant <tenant_id>
+  python scripts/data/validate_seed.py [--db data/app.db] [--tenant <id>]  # 默认根目录库；单租户自动选
                                                             # 对后端真实库断言漏斗与阶段分布
 口径：docs PRD-v1 §4/§6.2 + data/sample/METRICS-FIELDS.md §3.2。
 """
@@ -127,16 +127,23 @@ def check(con: sqlite3.Connection, tenant: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true")
-    ap.add_argument("--db")
+    ap.add_argument("--db", default=str(ROOT / "data" / "app.db"))
     ap.add_argument("--tenant")
     a = ap.parse_args()
     if a.selftest:
         con, t = build_selftest_db()
         return check(con, t)
-    if not (a.db and a.tenant):
-        ap.error("--db 和 --tenant 必填（或用 --selftest）")
+    if not Path(a.db).exists():
+        ap.error(f"找不到数据库：{a.db}")
     con = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
-    return check(con, a.tenant)
+    tenant = a.tenant
+    if not tenant:
+        ts = [r[0] for r in con.execute("SELECT DISTINCT tenant_id FROM customers")]
+        if len(ts) != 1:
+            ap.error(f"库里有 {len(ts)} 个租户，请用 --tenant 指定")
+        tenant = ts[0]
+    print(f"db={a.db} tenant={tenant}")
+    return check(con, tenant)
 
 
 if __name__ == "__main__":
