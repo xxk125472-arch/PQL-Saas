@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -11,14 +11,14 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ErrorBanner } from '@/components/EmptyState'
+import { FeishuSyncSummary } from '@/components/FeishuSyncSummary'
 import { errorMessage, request } from '@/lib/api'
-import { FEATURE_BACKEND } from '@/lib/backend'
 import { formatDateTime } from '@/lib/format'
+import { getFeishuConfig, syncFeishu, syncSummary } from '@/lib/feishu'
 import { deleteSynthetic, generateSynthetic } from '@/lib/synthetic'
-import type { UploadResult } from '@/lib/types'
+import type { CsvUploadResult, FeishuSyncResult } from '@/lib/types'
 
 const MAX_BYTES = 2 * 1024 * 1024
-const PARSER_PENDING = '解析功能即将上线'
 
 type JobType = 'synthetic' | 'synthetic_delete' | 'csv_customers' | 'csv_events' | 'feishu'
 type Job = { id: string; type: JobType; ok: boolean; at: string; summary: string }
@@ -116,7 +116,7 @@ export function DataCenter() {
               {jobs.map((j) => (
                 <TableRow key={j.id + j.at} className="animate-fade-in">
                   <TableCell className="text-foreground">{JOB_LABEL[j.type]}</TableCell>
-                  <TableCell>{j.ok ? <Badge tone="mint">成功</Badge> : <Badge tone="red">失败</Badge>}</TableCell>
+                  <TableCell>{j.ok ? <Badge tone="gray">成功</Badge> : <Badge tone="churn">失败</Badge>}</TableCell>
                   <TableCell className="font-mono text-xs">{formatDateTime(j.at)}</TableCell>
                   <TableCell>{j.summary}</TableCell>
                 </TableRow>
@@ -211,11 +211,10 @@ function SyntheticPanel({ onJob }: { onJob: AddJob }) {
 
 function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; title: string; onJob: AddJob }) {
   const template = TEMPLATES[kind]
-  const mocked = FEATURE_BACKEND.csv === 'mock'
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
-  const [result, setResult] = useState<UploadResult | null>(null)
+  const [result, setResult] = useState<CsvUploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAllErrors, setShowAllErrors] = useState(false)
 
@@ -236,17 +235,12 @@ function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; tit
     form.append('file', file)
     const type = kind === 'customers' ? 'csv_customers' : 'csv_events'
     try {
-      const res = await request<UploadResult>(`/data/csv/${kind}`, { method: 'POST', body: form })
+      const res = await request<CsvUploadResult>(`/data/csv/${kind}`, { method: 'POST', body: form })
       setResult(res)
       const errs = res.errors.length
-      onJob({
-        id: res.import_id,
-        type,
-        ok: true,
-        summary: `校验 ${res.rows} 行，${errs} 行有误${res.mocked ? `（${PARSER_PENDING}，未写入）` : ''}`,
-      })
-      if (errs) toast.warning(`${file.name}：${errs} 行有误，请查看错误明细`)
-      else toast.success(res.mocked ? `${file.name} 校验通过，${PARSER_PENDING}` : `${file.name} 导入完成`)
+      onJob({ id: res.import_id, type, ok: true, summary: csvSummary(res) + (res.mocked ? '（模拟，未写入）' : '') })
+      if (errs) toast.warning(`${file.name}：${errs} 行有误，其余已导入`)
+      else toast.success(`${file.name} 导入完成，已重算评分`)
     } catch (err) {
       setError(errorMessage(err))
       onJob({ id: crypto.randomUUID(), type, ok: false, summary: errorMessage(err) })
@@ -271,7 +265,6 @@ function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; tit
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle>{title}</CardTitle>
           <Mono>{template.file}</Mono>
-          {mocked && <Badge tone="gray">{PARSER_PENDING}</Badge>}
         </div>
         <Button variant="ghost" size="sm" onClick={() => downloadTemplate(kind)}>
           <Download />
@@ -308,7 +301,7 @@ function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; tit
           className="grid justify-items-center gap-2 rounded-lg border border-dashed border-border-strong/60 bg-background px-5 py-8 text-center text-[13px] text-body transition-colors duration-150 hover:border-foreground/40 hover:bg-surface-2/60 disabled:cursor-wait disabled:opacity-60 data-[drag]:border-foreground/50 data-[drag]:bg-surface-2"
         >
           <Upload className="size-5 text-mute" />
-          <span className="font-medium text-foreground">{uploading ? '正在校验…' : '点击选择或拖拽文件到此处'}</span>
+          <span className="font-medium text-foreground">{uploading ? '正在导入…' : '点击选择或拖拽文件到此处'}</span>
           <span className="text-xs text-mute">UTF-8 编码，单个文件不超过 2MB</span>
         </button>
         <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
@@ -318,21 +311,17 @@ function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; tit
         {result && (
           <div className="animate-fade-in grid gap-2 rounded-lg bg-surface-2 px-4 py-3 text-[13px]">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-body">
-              <span>
-                共 <span className="num font-medium text-foreground">{result.rows}</span> 行
-              </span>
-              <span>
-                通过 <span className="num font-medium text-foreground">{result.valid}</span>
-              </span>
-              <span>
-                有误 <span className="num font-medium" style={{ color: errors.length ? 'var(--destructive)' : undefined }}>{errors.length}</span>
-              </span>
+              <Stat label="新增" value={result.inserted} />
+              {result.updated !== undefined && <Stat label="更新" value={result.updated} />}
+              <Stat label="跳过（重复）" value={result.skipped} />
+              <Stat label="有误" value={errors.length} danger={errors.length > 0} />
             </div>
-            {result.mocked && <span className="text-xs text-mute">{PARSER_PENDING}，本次仅做格式校验，未写入数据。</span>}
+            {result.mocked && <span className="text-xs text-mute">当前为模拟模式，仅做格式校验，未写入数据。</span>}
+            {errors.length >= 50 && <span className="text-xs text-mute">错误较多，仅显示前 50 条。</span>}
             {errors.length > 0 && (
               <ul className="grid gap-1 font-mono text-xs text-destructive-deep">
                 {(showAllErrors ? errors : errors.slice(0, 5)).map((e) => (
-                  <li key={e.line}>
+                  <li key={`${e.line}-${e.reason}`}>
                     第 {e.line} 行：{e.reason}
                   </li>
                 ))}
@@ -352,17 +341,51 @@ function UploadPanel({ kind, title, onJob }: { kind: 'customers' | 'events'; tit
   )
 }
 
+function csvSummary(r: CsvUploadResult) {
+  const parts = [`新增 ${r.inserted}`]
+  if (r.updated !== undefined) parts.push(`更新 ${r.updated}`)
+  parts.push(`跳过 ${r.skipped}`)
+  if (r.errors.length) parts.push(`${r.errors.length} 行有误`)
+  return parts.join('，')
+}
+
+function Stat({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
+  return (
+    <span>
+      {label}{' '}
+      <span className="num font-medium" style={{ color: danger ? 'var(--destructive)' : 'var(--foreground)' }}>
+        {value}
+      </span>
+    </span>
+  )
+}
+
 function FeishuPanel({ onJob }: { onJob: AddJob }) {
+  // undefined = loading, null = not configured
+  const [configured, setConfigured] = useState<boolean | undefined>(undefined)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<FeishuSyncResult | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getFeishuConfig()
+      .then((c) => !cancelled && setConfigured(Boolean(c)))
+      .catch(() => !cancelled && setConfigured(false))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function sync() {
     setSyncing(true)
     setError(null)
+    setResult(null)
     try {
-      await request('/integrations/feishu/sync', { method: 'POST' })
-      toast.success('飞书同步完成')
-      onJob({ id: crypto.randomUUID(), type: 'feishu', ok: true, summary: '同步完成' })
+      const res = await syncFeishu()
+      setResult(res)
+      toast.success(res.errors.length ? `飞书同步完成，${res.errors.length} 条有误` : '飞书同步完成，已重算评分')
+      onJob({ id: res.import_id, type: 'feishu', ok: true, summary: syncSummary(res) })
     } catch (err) {
       setError(errorMessage(err))
       onJob({ id: crypto.randomUUID(), type: 'feishu', ok: false, summary: errorMessage(err) })
@@ -376,20 +399,23 @@ function FeishuPanel({ onJob }: { onJob: AddJob }) {
       <CardContent className="grid gap-4 p-6">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="grid max-w-xl gap-2">
-            <h2 className="heading text-base">飞书表格 / 多维表格只读同步</h2>
+            <h2 className="heading text-base">飞书多维表格只读同步</h2>
             <p className="text-[13px] leading-5 text-body">
               按字段映射拉取客户与事件，写入 <Mono>source=feishu</Mono>，不会回写飞书。凭证与字段映射在设置页配置。
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" asChild>
-              <Link to="/settings">去配置</Link>
+              <Link to="/settings">{configured === false ? '去配置' : '查看配置'}</Link>
             </Button>
-            <Button loading={syncing} onClick={sync}>
+            <Button loading={syncing} disabled={!configured} onClick={sync}>
               立即同步
             </Button>
           </div>
         </div>
+        {configured === false && (
+          <p className="text-[13px] text-mute">尚未配置飞书凭证与表格，请先在设置页填写并保存。</p>
+        )}
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-2 px-4 py-3 text-[13px] text-body">
           <span className="mr-1 font-mono text-xs text-mute">必填映射</span>
           客户 ID → <Mono>external_id</Mono>
@@ -398,6 +424,7 @@ function FeishuPanel({ onJob }: { onJob: AddJob }) {
           · 事件时间 → <Mono>occurred_at</Mono>
         </div>
         {error && <ErrorBanner message={error} />}
+        {result && <FeishuSyncSummary result={result} />}
       </CardContent>
     </Card>
   )

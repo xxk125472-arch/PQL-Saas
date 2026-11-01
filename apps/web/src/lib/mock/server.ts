@@ -63,9 +63,11 @@ export async function mockFetch(path: string, method: string, body: unknown): Pr
   if (route === 'POST /data/csv/customers' || route === 'POST /data/csv/events') {
     const kind = route.endsWith('customers') ? 'customers' : 'events'
     const result = validateCsv(kind, await readUpload(body))
-    return { ok: true, import_id: `mock-${crypto.randomUUID()}`, mocked: true, ...result }
+    // Same shape as the real endpoint; nothing is written, so inserted means "would insert".
+    return { ok: true, import_id: `mock-${crypto.randomUUID()}`, mocked: true, inserted: result.valid, updated: 0, skipped: 0, errors: result.errors }
   }
-  if (route === 'POST /integrations/feishu/sync') throw new MockHttpError(400, 'feishu credentials missing')
+  if (pathname.startsWith('/integrations/feishu/'))
+    throw new MockHttpError(400, '请先配置飞书 App ID 和 App Secret（当前为模拟模式）', 'FEISHU_CREDENTIALS_MISSING')
 
   throw new MockHttpError(501, 'not implemented')
 }

@@ -6,7 +6,6 @@ import { useAuth } from '@/auth/AuthProvider'
 import { Logo } from '@/components/Logo'
 import { ThemeRadioItems } from '@/components/ThemeMenu'
 import { DataSourceBadge } from '@/components/DataSourceBadge'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,8 +22,8 @@ const links = [
   { to: '/overview', label: '总览', Icon: LayoutGrid },
   { to: '/customers', label: '客户', Icon: Users },
   { to: '/data', label: '数据中心', Icon: Database },
-  { to: '/analysis', label: '分析', Icon: Sparkles, soon: true },
-  { to: '/settings', label: '设置', Icon: Settings, soon: true },
+  { to: '/analysis', label: '分析', Icon: Sparkles },
+  { to: '/settings', label: '设置', Icon: Settings },
 ]
 
 export function AppShell() {
@@ -35,7 +34,7 @@ export function AppShell() {
 
   if (status === 'loading') {
     return (
-      <div className="grid min-h-screen place-items-center">
+      <div className="grid min-h-dvh place-items-center">
         <div className="animate-fade-in flex flex-col items-center gap-3 text-[13px] text-body">
           <Logo size={28} />
           正在验证登录状态…
@@ -52,8 +51,8 @@ export function AppShell() {
   const name = user.email ?? user.username ?? '用户'
 
   return (
-    <div className="grid min-h-screen grid-cols-1 md:grid-cols-[232px_minmax(0,1fr)]">
-      <aside className="flex flex-col gap-1 border-b border-border bg-background px-3 py-3 md:sticky md:top-0 md:h-screen md:border-r md:border-b-0">
+    <div className="grid min-h-dvh grid-cols-1 md:grid-cols-[232px_minmax(0,1fr)]">
+      <aside className="flex flex-col gap-1 border-b border-border bg-background px-3 py-3 md:sticky md:top-0 md:h-dvh md:self-start md:overflow-y-auto md:border-r md:border-b-0">
         <div className="flex h-10 items-center gap-2.5 px-2">
           <Logo />
           <span className="text-sm font-semibold tracking-[-0.28px]">PQL Health</span>
@@ -61,7 +60,7 @@ export function AppShell() {
 
         <div className="hidden px-2 pt-4 pb-1.5 font-mono text-xs text-mute md:block">工作台</div>
         <nav aria-label="主导航" className="flex flex-wrap gap-0.5 md:grid">
-          {links.map(({ to, label, Icon, soon }) => (
+          {links.map(({ to, label, Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -76,11 +75,6 @@ export function AppShell() {
             >
               <Icon className="size-4" />
               {label}
-              {soon && (
-                <Badge tone="gray" className="ml-auto">
-                  即将上线
-                </Badge>
-              )}
             </NavLink>
           ))}
         </nav>

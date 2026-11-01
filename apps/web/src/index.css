@@ -43,6 +43,9 @@
   --hue-amber: #ab570a;
   --hue-red: #c50000;
   --hue-pink: #d6006b;
+  /* Muted (low-saturation) warm hues — reserved for 风险 / 流失 tags and health dots */
+  --hue-risk: #a86a32;
+  --hue-churn: #b5524b;
   --tag-alpha: 10%;
 
   --scrim: rgb(0 0 0 / 30%);
@@ -99,6 +102,8 @@
   --hue-amber: #f5b54a;
   --hue-red: #ff6b6b;
   --hue-pink: #ff5ca8;
+  --hue-risk: #d9a46e;
+  --hue-churn: #e08a82;
   --tag-alpha: 16%;
 
   --scrim: rgb(0 0 0 / 60%);

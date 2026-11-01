@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 
-export type BadgeTone = 'gray' | 'blue' | 'teal' | 'violet' | 'mint' | 'amber' | 'red' | 'pink'
+export type BadgeTone = 'gray' | 'blue' | 'teal' | 'violet' | 'mint' | 'amber' | 'red' | 'pink' | 'risk' | 'churn'
 
 // Low-saturation fill + same-hue text (UI-IA §7.3). Hue values live in index.css.
 const HUE: Record<BadgeTone, string> = {
@@ -13,6 +13,8 @@ const HUE: Record<BadgeTone, string> = {
   amber: 'var(--hue-amber)',
   red: 'var(--hue-red)',
   pink: 'var(--hue-pink)',
+  risk: 'var(--hue-risk)',
+  churn: 'var(--hue-churn)',
 }
 
 type BadgeProps = React.ComponentProps<'span'> & { tone?: BadgeTone }

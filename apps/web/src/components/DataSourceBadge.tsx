@@ -4,7 +4,7 @@ import { FEATURE_LABEL, MOCKED_FEATURES } from '@/lib/backend'
 /** Mono badge so demos never confuse mocked features with the live API. */
 export function DataSourceBadge() {
   const mocked = MOCKED_FEATURES.map((f) => FEATURE_LABEL[f]).join('、')
-  const host = API_BASE.replace(/^https?:\/\//, '')
+  const host = (API_BASE.startsWith('/') ? window.location.host + API_BASE : API_BASE).replace(/^https?:\/\//, '')
   return (
     <span
       className="inline-flex h-6 items-center gap-1.5 rounded-full bg-surface px-2.5 font-mono text-xs text-body shadow-l1"

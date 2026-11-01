@@ -1,16 +1,18 @@
 import type { BadgeTone } from '@/components/ui/badge'
 import type { ActionCode, Stage } from './types'
 
-// Copy from docs/ui/UI-IA-v1.md §5; colours remapped to DESIGN.md semantics per §7.3.
+// Copy from docs/ui/UI-IA-v1.md §5. Round-3 visual pass: normal stages are all grayscale;
+// only 风险 / 流失 keep a low-saturation orange / red so the eye goes straight to them.
+// Raw codes are never rewritten — these maps are display-only.
 
 export const STAGES: Record<Stage, { label: string; tone: BadgeTone }> = {
   new: { label: '新客', tone: 'gray' },
-  installed: { label: '已安装', tone: 'blue' },
-  first_value: { label: '首次价值', tone: 'teal' },
-  reuse: { label: '复用', tone: 'violet' },
-  retention: { label: '留存', tone: 'mint' },
-  at_risk: { label: '风险', tone: 'amber' },
-  churned: { label: '流失', tone: 'red' },
+  installed: { label: '已安装', tone: 'gray' },
+  first_value: { label: '首次价值', tone: 'gray' },
+  reuse: { label: '复用', tone: 'gray' },
+  retention: { label: '留存', tone: 'gray' },
+  at_risk: { label: '风险', tone: 'risk' },
+  churned: { label: '流失', tone: 'churn' },
 }
 
 export const STAGE_ORDER: Stage[] = ['new', 'installed', 'first_value', 'reuse', 'retention', 'at_risk', 'churned']
@@ -28,10 +30,20 @@ export const ACTIONS: Record<ActionCode, string> = {
 export const EVENT_TYPES: Record<string, string> = {
   install: '安装',
   first_value: '首次价值',
+  feature_use: '功能使用',
   reuse: '复用',
   retention_active: '留存活跃',
-  feature_use: '功能使用',
   other: '其他',
+}
+
+export const FEATURE_KEYS: Record<string, string> = {
+  dashboard: '看板',
+  funnel: '漏斗',
+  import_csv: 'CSV 导入',
+  score_view: '查看评分',
+  analysis: 'AI 分析',
+  settings: '设置',
+  feishu_sync: '飞书同步',
 }
 
 export const HEALTH_FACTORS: Record<string, string> = {
@@ -56,10 +68,17 @@ export function healthLevel(score: number): HealthLevel {
   return 'risk'
 }
 
+// Restrained dots: healthy is a neutral gray, only fair / risk carry the muted warm hues.
 export const HEALTH_LEVELS: Record<HealthLevel, { label: string; dot: string }> = {
-  healthy: { label: '健康', dot: 'var(--hue-mint)' },
-  fair: { label: '一般', dot: 'var(--warning)' },
-  risk: { label: '风险倾向', dot: 'var(--destructive)' },
+  healthy: { label: '健康', dot: 'var(--border-strong)' },
+  fair: { label: '一般', dot: 'var(--hue-risk)' },
+  risk: { label: '风险倾向', dot: 'var(--hue-churn)' },
 }
 
-export const SOURCES: Record<string, string> = { synthetic: '演示数据', csv: 'CSV', feishu: '飞书', manual: '手动' }
+export const SOURCES: Record<string, string> = { synthetic: '演示数据', csv: 'CSV 导入', feishu: '飞书同步', manual: '手动' }
+
+export const STAGE_LABEL = (code: string) => (STAGES as Record<string, { label: string }>)[code]?.label
+export const ACTION_LABEL = (code: string) => (ACTIONS as Record<string, string>)[code]
+
+/** Display name for the only official skill (backend name is kept as-is in the API). */
+export const SKILL_LABEL: Record<string, string> = { weekly_focus_v1: '每周重点分析' }

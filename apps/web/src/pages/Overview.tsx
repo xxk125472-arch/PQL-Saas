@@ -61,8 +61,8 @@ export function Overview() {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Stat label="客户总数" value={data?.customer_total} loading={initialLoading} />
           <Stat label="PQL 数" value={data?.pql_count} loading={initialLoading} hint="PQL 分 ≥ 阈值且已达首次价值" />
-          <Stat label="风险客户" value={data?.at_risk_count} loading={initialLoading} hint="超过 7 天无事件" dot="var(--warning)" />
-          <Stat label="流失" value={data?.churned_count} loading={initialLoading} hint="超过 30 天无事件" dot="var(--destructive)" />
+          <Stat label="风险客户" value={data?.at_risk_count} loading={initialLoading} hint="超过 7 天无事件" dot="var(--hue-risk)" />
+          <Stat label="流失" value={data?.churned_count} loading={initialLoading} hint="超过 30 天无事件" dot="var(--hue-churn)" />
         </div>
 
         <Card>

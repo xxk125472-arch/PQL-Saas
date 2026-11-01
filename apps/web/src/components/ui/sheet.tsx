@@ -3,7 +3,7 @@ import * as SheetPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-// Right-side drawer: 280ms slide with cubic-bezier(0.32,0.72,0,1), scrim fades (UI-IA §7.4).
+// Right-side drawer: 240ms slide with cubic-bezier(0.32,0.72,0,1), scrim fades (UI-IA §7.4).
 
 const Sheet = SheetPrimitive.Root
 const SheetTrigger = SheetPrimitive.Trigger
@@ -12,12 +12,12 @@ const SheetClose = SheetPrimitive.Close
 function SheetContent({ className, children, ...props }: React.ComponentProps<typeof SheetPrimitive.Content>) {
   return (
     <SheetPrimitive.Portal>
-      <SheetPrimitive.Overlay className="fixed inset-0 z-40 bg-[var(--scrim)] data-[state=closed]:animate-[fade-out_250ms_ease-out_forwards] data-[state=open]:animate-[fade-in_280ms_ease-out]" />
+      <SheetPrimitive.Overlay className="fixed inset-0 z-40 h-dvh w-screen bg-[var(--scrim)] data-[state=closed]:animate-[fade-out_250ms_ease-out_forwards] data-[state=open]:animate-[fade-in_240ms_ease-out]" />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          'fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-[520px] flex-col bg-surface shadow-l5 outline-none',
-          'data-[state=open]:animate-[sheet-in_280ms_cubic-bezier(0.32,0.72,0,1)] data-[state=closed]:animate-[sheet-out_250ms_cubic-bezier(0.32,0.72,0,1)_forwards]',
+          'fixed top-0 right-0 bottom-0 z-50 flex h-dvh w-full max-w-[520px] flex-col bg-surface shadow-l5 outline-none',
+          'data-[state=open]:animate-[sheet-in_240ms_cubic-bezier(0.32,0.72,0,1)] data-[state=closed]:animate-[sheet-out_250ms_cubic-bezier(0.32,0.72,0,1)_forwards]',
           className,
         )}
         {...props}

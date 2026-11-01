@@ -1,5 +1,6 @@
 /*
- * Login / register backdrop — Vercel mesh (cyan / blue / magenta / amber) in pure CSS.
+ * Login / register backdrop — Vercel mesh in pure CSS. Round 3: magenta stop removed
+ * (cyan / blue / amber remain) and the light-mode layer runs at half opacity.
  * Only transform + opacity animate; no filter / backdrop-filter / canvas (UI-IA §7.2, §7.5).
  */
 
@@ -22,6 +23,7 @@
 .mesh__layer {
   position: absolute;
   inset: 0;
+  opacity: 0.5;
   transform-origin: 50% 50%;
   transition:
     transform 560ms cubic-bezier(0.65, 0, 0.35, 1),
@@ -53,13 +55,6 @@
   right: -20vmax;
   background: radial-gradient(closest-side, rgb(0 124 240 / 60%), rgb(0 124 240 / 0%));
   animation-duration: 18s;
-}
-
-.mesh__blob--magenta {
-  bottom: -34vmax;
-  right: -14vmax;
-  background: radial-gradient(closest-side, rgb(255 0 128 / 48%), rgb(255 0 128 / 0%));
-  animation-duration: 17s;
 }
 
 .mesh__blob--amber {

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, RefreshCw, Search, Users } from 'lucide-react'
 import { Page, PageHeader } from '@/layout/AppShell'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { EmptyState, ErrorBanner } from '@/components/EmptyState'
+import { HealthDot, PqlTag, StageTag } from '@/components/Tags'
 import { errorMessage, request } from '@/lib/api'
-import { ACTIONS, HEALTH_LEVELS, STAGES, STAGE_ORDER, healthLevel } from '@/lib/dictionary'
+import { ACTIONS, HEALTH_LEVELS, STAGES, STAGE_ORDER } from '@/lib/dictionary'
 import type { HealthLevel } from '@/lib/dictionary'
 import { formatDateTime } from '@/lib/format'
 import { generateSynthetic } from '@/lib/synthetic'
@@ -88,13 +88,11 @@ export function Customers() {
     if (q) params.set('q', q)
     if (stage !== ALL) params.set('stage', stage)
     if (pql !== ALL) params.set('is_pql', pql)
+    if (health !== ALL) params.set('health', health)
     return request<CustomerList>(`/customers?${params}`)
-  }, [q, stage, pql, page])
+  }, [q, stage, pql, health, page])
 
-  const rows = useMemo(() => {
-    const items = data?.items ?? []
-    return health === ALL ? items : items.filter((c) => healthLevel(c.health_score) === health)
-  }, [data, health])
+  const rows = data?.items ?? []
 
   const hasFilters = Boolean(q || stage !== ALL || pql !== ALL || health !== ALL)
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
@@ -138,11 +136,7 @@ export function Customers() {
             </div>
             <FilterSelect label="阶段" value={stage} onChange={withPageReset(setStage)} options={STAGE_OPTIONS} />
             <FilterSelect label="是否 PQL" value={pql} onChange={withPageReset(setPql)} options={PQL_OPTIONS} />
-            {/* GET /customers has no `health` param yet, so this narrows the loaded page only. */}
-            <div className="flex items-center gap-1.5">
-              <FilterSelect label="健康等级（仅本页）" value={health} onChange={setHealth} options={HEALTH_OPTIONS} />
-              <span className="font-mono text-xs text-mute">仅本页</span>
-            </div>
+            <FilterSelect label="健康等级" value={health} onChange={withPageReset(setHealth)} options={HEALTH_OPTIONS} />
             <div className="flex-1" />
             {hasFilters && (
               <Button
@@ -203,7 +197,6 @@ export function Customers() {
                 </TableHeader>
                 <TableBody>
                   {rows.map((c) => {
-                    const st = STAGES[c.stage] ?? { label: c.stage, tone: 'gray' as const }
                     return (
                       <TableRow
                         key={c.id}
@@ -225,16 +218,16 @@ export function Customers() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge tone={st.tone}>{st.label}</Badge>
+                          <StageTag stage={c.stage} />
                         </TableCell>
                         <TableCell className="text-right">
                           <span className="num inline-flex items-center gap-2 text-foreground">
-                            <span className="size-1.5 rounded-full" style={{ background: HEALTH_LEVELS[healthLevel(c.health_score)].dot }} />
+                            <HealthDot score={c.health_score} />
                             {c.health_score}
                           </span>
                         </TableCell>
                         <TableCell className="num text-right">{c.pql_score}</TableCell>
-                        <TableCell>{c.is_pql ? <Badge tone="pink">PQL</Badge> : <span className="text-mute">—</span>}</TableCell>
+                        <TableCell>{c.is_pql ? <PqlTag /> : <span className="text-mute">—</span>}</TableCell>
                         <TableCell className="max-w-[280px] truncate" title={ACTIONS[c.suggested_action]}>
                           {ACTIONS[c.suggested_action] ?? '—'}
                         </TableCell>
@@ -250,8 +243,7 @@ export function Customers() {
           {data && data.total > 0 && (
             <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2.5 text-xs text-mute">
               <span>
-                共 <span className="num">{data.total}</span> 位客户
-                {health !== ALL && `，本页按健康等级筛出 ${rows.length} 位`}
+                {hasFilters ? '筛选后' : '共'} <span className="num">{data.total}</span> 位客户
               </span>
               <div className="flex items-center gap-2">
                 <span className="num font-mono">

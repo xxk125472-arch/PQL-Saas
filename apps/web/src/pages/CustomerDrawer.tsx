@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/EmptyState'
+import { EnumLabel, HealthDot, PqlTag, SourceLabel, StageTag } from '@/components/Tags'
 import { errorMessage, request } from '@/lib/api'
-import { ACTIONS, EVENT_TYPES, HEALTH_FACTORS, HEALTH_LEVELS, PQL_FACTORS, SOURCES, STAGES, healthLevel } from '@/lib/dictionary'
+import { ACTIONS, EVENT_TYPES, FEATURE_KEYS, HEALTH_FACTORS, PQL_FACTORS } from '@/lib/dictionary'
 import { formatDateTime, parseDate } from '@/lib/format'
 import type { CustomerDetail, CustomerEvent } from '@/lib/types'
 
@@ -48,7 +48,6 @@ export function CustomerDrawer({ customerId, onClose }: { customerId: string | n
     }
   }, [customerId, attempt])
 
-  const stage = detail ? (STAGES[detail.stage] ?? { label: detail.stage, tone: 'gray' as const }) : null
   const score = detail?.score
 
   return (
@@ -59,10 +58,10 @@ export function CustomerDrawer({ customerId, onClose }: { customerId: string | n
           {detail ? (
             <SheetDescription asChild>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                {stage && <Badge tone={stage.tone}>{stage.label}</Badge>}
-                {score?.is_pql && <Badge tone="pink">PQL</Badge>}
+                <StageTag stage={detail.stage} />
+                {score?.is_pql && <PqlTag />}
                 <span className="font-mono text-xs text-mute">{detail.external_id}</span>
-                <span className="text-xs text-mute">· 来源：{SOURCES[detail.source] ?? detail.source}</span>
+                <SourceLabel source={detail.source} />
               </div>
             </SheetDescription>
           ) : (
@@ -80,11 +79,11 @@ export function CustomerDrawer({ customerId, onClose }: { customerId: string | n
               <div className="grid grid-cols-3 overflow-hidden rounded-lg shadow-l1">
                 <Kpi label="健康分">
                   <span className="inline-flex items-center gap-2">
-                    <span className="size-2 rounded-full" style={{ background: HEALTH_LEVELS[healthLevel(score?.health_score ?? 0)].dot }} />
-                    {score?.health_score ?? '—'}
+                    {score && <HealthDot score={score.health_score} className="size-2" />}
+                    {score ? Math.round(score.health_score) : '—'}
                   </span>
                 </Kpi>
-                <Kpi label="PQL 分">{score?.pql_score ?? '—'}</Kpi>
+                <Kpi label="PQL 分">{score ? Math.round(score.pql_score) : '—'}</Kpi>
                 <Kpi label="最近活跃" small>
                   {formatDateTime(detail.last_active_at)}
                 </Kpi>
@@ -117,8 +116,8 @@ export function CustomerDrawer({ customerId, onClose }: { customerId: string | n
                   <ul className="divide-y divide-border overflow-hidden rounded-lg shadow-l1">
                     {detail.events.slice(0, 20).map((e) => (
                       <li key={e.id} className="flex items-center gap-2.5 px-3.5 py-2.5 text-[13px]">
-                        <span className="text-foreground">{EVENT_TYPES[e.event_type] ?? e.event_type}</span>
-                        {e.feature_key && <span className="font-mono text-xs text-mute">{e.feature_key}</span>}
+                        <EnumLabel value={e.event_type} map={EVENT_TYPES} className="text-foreground" />
+                        <EnumLabel value={e.feature_key} map={FEATURE_KEYS} className="text-xs text-mute" />
                         <span className="ml-auto font-mono text-xs text-mute">{formatDateTime(e.occurred_at)}</span>
                       </li>
                     ))}

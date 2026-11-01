@@ -1,20 +1,32 @@
-// Which features hit the real FastAPI backend and which are still answered by the
-// in-browser mock. When a backend slice ships, flip its entry to 'real' — nothing else changes.
+// Which features hit the real FastAPI backend and which are answered by the in-browser mock.
+// Default: everything real. For offline demos, set VITE_MOCK_FEATURES=csv,feishu (comma list)
+// in apps/web/.env.local — only csv / feishu have mock handlers (see ./mock/server.ts).
 
 export type Backend = 'real' | 'mock'
 
-export const FEATURE_BACKEND = {
+const DEFAULT_BACKEND = {
   auth: 'real', // /auth/*, /me
   overview: 'real', // /overview/funnel
   customers: 'real', // /customers, /customers/{id}
   synthetic: 'real', // POST / DELETE /data/synthetic
-  csv: 'mock', // /data/csv/*
-  settings: 'mock', // /settings (scoring weights), /settings/llm/test
-  feishu: 'mock', // /integrations/feishu/*
-  analysis: 'mock', // /analysis/*
+  csv: 'real', // /data/csv/*
+  settings: 'real', // /settings
+  feishu: 'real', // /integrations/feishu/*
+  analysis: 'real', // /analysis/*
 } satisfies Record<string, Backend>
 
-export type Feature = keyof typeof FEATURE_BACKEND
+const MOCK_OVERRIDE = new Set(
+  String(import.meta.env.VITE_MOCK_FEATURES ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+
+export const FEATURE_BACKEND: Record<keyof typeof DEFAULT_BACKEND, Backend> = Object.fromEntries(
+  Object.entries(DEFAULT_BACKEND).map(([k, v]) => [k, MOCK_OVERRIDE.has(k) ? 'mock' : v]),
+) as Record<keyof typeof DEFAULT_BACKEND, Backend>
+
+export type Feature = keyof typeof DEFAULT_BACKEND
 
 export const FEATURE_LABEL: Record<Feature, string> = {
   auth: '登录注册',
@@ -24,7 +36,7 @@ export const FEATURE_LABEL: Record<Feature, string> = {
   csv: 'CSV 导入',
   settings: '评分设置',
   feishu: '飞书同步',
-  analysis: 'AI 分析',
+  analysis: '每周重点分析',
 }
 
 const PREFIXES: Array<[string, Feature]> = [

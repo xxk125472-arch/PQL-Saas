@@ -4,7 +4,8 @@
 import { backendFor } from './backend'
 import { MockHttpError, mockFetch } from './mock/server'
 
-export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8000/api/v1'
+// Same-origin by default: the backend serves apps/web/dist on :8000, and `vite dev` proxies /api to it.
+export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || '/api/v1'
 
 const TOKEN_KEY = 'pql.token'
 

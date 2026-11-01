@@ -10,6 +10,7 @@ export function Toaster() {
       position="top-right"
       duration={3500}
       gap={8}
+      containerAriaLabel="通知"
       toastOptions={{
         classNames: {
           toast: '!rounded-lg !border-0 !bg-surface !text-foreground !shadow-l4 !font-sans !text-[13px]',

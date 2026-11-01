@@ -111,13 +111,12 @@ export function AuthPage({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div className="auth relative min-h-screen overflow-hidden bg-background" data-phase={phase}>
+    <div className="auth relative min-h-dvh overflow-hidden bg-background" data-phase={phase}>
       <div className="mesh" aria-hidden="true">
         <div className="mesh__parallax" ref={parallaxRef}>
           <div className="mesh__layer">
             <span className="mesh__blob mesh__blob--cyan" />
             <span className="mesh__blob mesh__blob--blue" />
-            <span className="mesh__blob mesh__blob--magenta" />
             <span className="mesh__blob mesh__blob--amber" />
           </div>
         </div>
@@ -135,7 +134,7 @@ export function AuthPage({ mode }: { mode: Mode }) {
         </div>
       </header>
 
-      <main className="relative z-10 flex min-h-[calc(100vh-64px)] flex-col items-center justify-center px-4 pb-16">
+      <main className="relative z-10 flex min-h-[calc(100dvh-64px)] flex-col items-center justify-center px-4 pb-16">
         <div className="auth__chrome mb-6 text-center">
           <span className="inline-flex h-6 items-center rounded-full bg-surface px-2.5 font-mono text-xs text-body shadow-l1">
             客户健康度 · PQL 运营
