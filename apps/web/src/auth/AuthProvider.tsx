@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ApiError, UNAUTHORIZED_EVENT, request, tokenStore } from '../lib/api'
+import { ApiError, UNAUTHORIZED_EVENT, isUnauthorizedError, request, tokenStore } from '../lib/api'
 import type { Me, TokenResponse } from '../lib/types'
 
 type Status = 'loading' | 'authenticated' | 'anonymous'
@@ -29,8 +29,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!tokenStore.get()) return
     loadMe().catch((err) => {
-      // Keep the token when the server is merely unreachable; only a 401 invalidates it.
-      if (err instanceof ApiError && err.status === 401) tokenStore.clear()
+      // Keep the token when the server is merely unreachable; only UNAUTHORIZED invalidates it
+      // (request() has already cleared it in that case).
+      if (isUnauthorizedError(err)) tokenStore.clear()
       else toast.error(err instanceof ApiError ? err.message : '发生未知错误，请稍后重试')
       setUser(null)
       setStatus('anonymous')
@@ -73,9 +74,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await request('/auth/logout', { method: 'POST' })
+      await request('/auth/logout', { method: 'POST', quietUnauthorized: true })
     } catch {
-      // stateless JWT — discarding the token locally is what matters
+      // already-expired token or server unreachable — discarding it locally is what matters
     }
     tokenStore.clear()
     setUser(null)

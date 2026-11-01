@@ -168,7 +168,7 @@ function SyntheticPanel({ onJob }: { onJob: AddJob }) {
             一键写入 80 位样例客户及其事件，覆盖安装 → 首次价值 → 复用 → 留存全链路，以及新客、风险、流失客户，并立即重算健康分与 PQL。
           </p>
           <p className="text-[13px] leading-5 text-body">
-            生成与删除都只作用于 <Mono>source=synthetic</Mono> 的客户，CSV 与飞书导入的客户保持不变。
+            生成与删除都只作用于来源为「演示数据」的客户，CSV 与飞书导入的客户保持不变。
           </p>
         </div>
         <div className="flex gap-2">

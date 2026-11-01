@@ -11,9 +11,9 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/EmptyState'
 import { FeishuSyncSummary } from '@/components/FeishuSyncSummary'
-import { errorMessage } from '@/lib/api'
+import { ApiError, errorMessage } from '@/lib/api'
 import { EVENT_TYPES } from '@/lib/dictionary'
-import { DEFAULT_FIELD_MAPPING, getFeishuConfig, saveFeishuConfig, syncFeishu, testFeishu } from '@/lib/feishu'
+import { DEFAULT_FIELD_MAPPING, getFeishuConfig, hasSecret, maskedSecret, saveFeishuConfig, syncFeishu, testFeishu } from '@/lib/feishu'
 import type { FeishuConfig, FeishuConfigUpdate, FeishuFieldMapping, FeishuSyncResult } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -87,12 +87,6 @@ function parseValues(text: string): { values: Record<string, string>; error: str
   return { values, error: null }
 }
 
-/** "••••" + last 4 chars when the backend exposes them; plain dots otherwise. */
-function maskedSecret(masked: string | null | undefined) {
-  const tail = (masked ?? '').replace(/[*•]/g, '')
-  return tail.length >= 4 ? `••••${tail.slice(-4)}` : '••••••••'
-}
-
 function FeishuCard() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -115,7 +109,7 @@ function FeishuCard() {
 
   const fromEnv = config?.source === 'env'
   const persisted = Boolean(config)
-  const hasStoredSecret = Boolean(config?.app_secret_masked)
+  const hasStoredSecret = hasSecret(config?.app_secret_masked)
   const dirty = JSON.stringify(form) !== baseline || (secretEditing && secret.length > 0)
 
   const runTest = useCallback(async (quiet = false) => {
@@ -140,7 +134,7 @@ function FeishuCard() {
     setForm(f)
     setBaseline(JSON.stringify(f))
     setSecret('')
-    setSecretEditing(!c?.app_secret_masked)
+    setSecretEditing(!hasSecret(c?.app_secret_masked))
   }, [])
 
   const load = useCallback(async () => {
@@ -155,7 +149,16 @@ function FeishuCard() {
         setConnMsg(null)
       }
     } catch (err) {
-      setLoadError(errorMessage(err))
+      if (err instanceof ApiError && (err.code ?? '').startsWith('FEISHU_')) {
+        // A stored config the backend can't use (e.g. undecryptable secret): keep the form
+        // usable so it can be re-saved, and say why in Chinese.
+        apply(null)
+        setConn('failed')
+        setConnMsg(null)
+        setFormError(err.message)
+      } else {
+        setLoadError(errorMessage(err))
+      }
     } finally {
       setLoading(false)
     }
@@ -212,8 +215,15 @@ function FeishuCard() {
         event_type_values: values,
       },
     }
-    // Omitting app_secret keeps the stored one (PUT contract).
-    if (secretEditing && secret.trim()) body.app_secret = secret.trim()
+    // Only a secret the user actually typed is sent; omitting app_secret keeps the stored one
+    // (PUT contract). A pasted-back mask (`****…`) is never sent.
+    const typed = secret.trim()
+    if (secretEditing && typed && !typed.startsWith('****')) body.app_secret = typed
+    else if (needSecret) {
+      setSecretEditing(true)
+      setFormError('请填写完整的 App Secret')
+      return
+    }
     setSaving(true)
     try {
       const saved = await saveFeishuConfig(body)

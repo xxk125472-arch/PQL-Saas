@@ -87,36 +87,68 @@ const STATUS_ZH: Record<number, string> = {
   501: '该功能尚未上线',
 }
 
-// UI-IA §7.6: never surface raw English backend text.
-function detailToMessage(detail: unknown, status: number): string {
+/** Backend error codes the UI branches on (apps/api/app/main.py, integrations.py). */
+export const ERROR_CODE = {
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  FEISHU_CREDENTIALS_MISSING: 'FEISHU_CREDENTIALS_MISSING',
+} as const
+
+const HAS_CJK = /[一-鿿]/
+
+/** FastAPI validation errors: `errors` (new envelope) or legacy `detail` array of {loc, msg}. */
+function validationMessage(list: unknown): string | null {
+  if (!Array.isArray(list) || list.length === 0) return null
+  const first = list[0] as { loc?: unknown[] }
+  const field = Array.isArray(first.loc) ? String(first.loc[first.loc.length - 1]) : ''
+  if (field === 'password') return `密码至少 ${PASSWORD_MIN_LENGTH} 个字符`
+  if (field === 'file') return '请选择要上传的文件'
+  return null
+}
+
+type ErrorBody = { detail?: unknown; code?: string; errors?: unknown }
+
+/**
+ * UI-IA §7.6: never surface raw English backend text.
+ * The backend answers `{detail, code}` with `detail` already in Chinese — show it as-is;
+ * the tables below only cover legacy English details and missing bodies.
+ */
+function errorToMessage(body: ErrorBody, status: number): string {
+  const { detail, code } = body
+  if (code === ERROR_CODE.VALIDATION_ERROR || Array.isArray(detail)) {
+    const specific = validationMessage(body.errors) ?? validationMessage(detail)
+    if (specific) return specific
+  }
   if (typeof detail === 'string') {
     if (DETAIL_ZH[detail]) return DETAIL_ZH[detail]
     if (detail.startsWith('mapping missing')) return '飞书字段映射缺少必填项'
-    if (/[一-鿿]/.test(detail)) return detail
+    if (HAS_CJK.test(detail)) return detail
   }
-  // FastAPI validation errors: detail is [{loc, msg, ...}]
-  if (Array.isArray(detail) && detail.length > 0) {
-    const first = detail[0] as { loc?: unknown[] }
-    const field = Array.isArray(first.loc) ? String(first.loc[first.loc.length - 1]) : ''
-    if (field === 'password') return `密码至少 ${PASSWORD_MIN_LENGTH} 个字符`
-    if (field === 'file') return '请选择要上传的文件'
-    return STATUS_ZH[422]
-  }
+  if (code === ERROR_CODE.VALIDATION_ERROR || status === 422) return STATUS_ZH[422]
+  if (code === ERROR_CODE.UNAUTHORIZED) return STATUS_ZH[401]
   if (status >= 500) return '服务暂时不可用，请稍后再试'
   return STATUS_ZH[status] ?? `请求失败（${status}）`
 }
 
-type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; auth?: boolean }
+type RequestOptions = Omit<RequestInit, 'body'> & {
+  body?: unknown
+  auth?: boolean
+  /** Don't broadcast session expiry on UNAUTHORIZED (e.g. logout, which discards the token anyway). */
+  quietUnauthorized?: boolean
+}
 
-function onUnauthorized(status: number, auth: boolean) {
-  if (status === 401 && auth) {
-    tokenStore.clear()
-    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
-  }
+/** Session invalid: drop the token; AuthProvider listens and AppShell redirects to /login. */
+function isUnauthorized(status: number, code: string | undefined) {
+  return code === ERROR_CODE.UNAUTHORIZED || (code === undefined && status === 401)
+}
+
+function onUnauthorized() {
+  tokenStore.clear()
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { body, auth = true, headers, ...rest } = opts
+  const { body, auth = true, quietUnauthorized = false, headers, ...rest } = opts
   const method = (rest.method ?? 'GET').toUpperCase()
 
   if (backendFor(path) === 'mock') {
@@ -124,7 +156,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       return (await mockFetch(path, method, body)) as T
     } catch (err) {
       if (!(err instanceof MockHttpError)) throw err
-      throw new ApiError(err.status, detailToMessage(err.detail, err.status), err.code)
+      throw new ApiError(err.status, errorToMessage({ detail: err.detail, code: err.code }, err.status), err.code)
     }
   }
 
@@ -151,9 +183,15 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   const data = text ? safeJson(text) : null
 
   if (!res.ok) {
-    const err = (data ?? {}) as { detail?: unknown; code?: string }
-    onUnauthorized(res.status, auth)
-    throw new ApiError(res.status, detailToMessage(err.detail, res.status), err.code)
+    const err = (data && typeof data === 'object' ? data : {}) as ErrorBody
+    if (isUnauthorized(res.status, err.code)) {
+      // Unauthenticated calls (login / register) get a 401 for bad credentials — that is not
+      // an expired session, so stay on the page and say what went wrong.
+      if (!auth) throw new ApiError(res.status, DETAIL_ZH['invalid credentials'], err.code)
+      if (quietUnauthorized) tokenStore.clear()
+      else onUnauthorized()
+    }
+    throw new ApiError(res.status, errorToMessage(err, res.status), err.code)
   }
   return data as T
 }
@@ -164,6 +202,10 @@ function safeJson(text: string): unknown {
   } catch {
     return text
   }
+}
+
+export function isUnauthorizedError(err: unknown): boolean {
+  return err instanceof ApiError && isUnauthorized(err.status, err.code)
 }
 
 /** User-facing message: ApiError copy is already Chinese; anything else is logged and generalised. */

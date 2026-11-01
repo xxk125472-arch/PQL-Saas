@@ -90,7 +90,7 @@ export function Analysis() {
                     <SelectItem value={SKILL_ID}>{SKILL_LABEL[SKILL_ID]}</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="font-mono text-[11px] text-mute">{SKILL_ID}</span>
+                <span className="text-[11px] text-mute">第一版仅提供这一项分析</span>
               </Field>
 
               {(Object.keys(LIMITS) as NumKey[]).map((k) => {
@@ -210,7 +210,7 @@ function ResultCard({ run, running }: { run: AnalysisRun | null; running: boolea
           <span className="num font-mono text-foreground">{run.latency_ms ?? '—'} ms</span>
         </Meta>
         <Meta label="技能">
-          <MonoTag>{run.skill_id}</MonoTag>
+          <MonoTag>{SKILL_LABEL[run.skill_id] ?? '其他分析'}</MonoTag>
         </Meta>
         <Meta label="参数">
           <span className="text-foreground">

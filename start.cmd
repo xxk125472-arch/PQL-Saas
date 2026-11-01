@@ -4,25 +4,45 @@ chcp 65001 >nul
 title PQL Health
 rem ==========================================================================
 rem  PQL Health one-click start (Windows CMD)
-rem  Needs: Python 3.11+ and Node.js 20+ on PATH. Usage: start.cmd [--rebuild]
+rem  Needs: Python 3.11+ and Node.js 20+ on PATH.
+rem  Usage: start.cmd [--rebuild] [--reset-db]
 rem  First run: create apps\api\.venv + pip install, copy .env, npm ci + build.
 rem  Later runs skip finished steps; --rebuild forces a fresh frontend build.
-rem  Serves the API and apps\web\dist on http://127.0.0.1:8000 only.
+rem  --reset-db asks twice (in Chinese) and only then deletes the SQLite DB the
+rem  backend uses (default data\app.db) and rebuilds it. A plain start NEVER
+rem  deletes the database.
+rem  Serves the API and apps\web\dist on http://127.0.0.1:8000 only
+rem  (set PQL_PORT=xxxx beforehand to use another port, e.g. for testing).
 rem ==========================================================================
 
 set "ROOT=%~dp0"
 set "API=%ROOT%apps\api"
 set "WEB=%ROOT%apps\web"
 set "VPY=%API%\.venv\Scripts\python.exe"
-set "URL=http://127.0.0.1:8000"
+if not defined PQL_PORT set "PQL_PORT=8000"
+set "PORT=%PQL_PORT%"
+set "URL=http://127.0.0.1:%PORT%"
 set "REBUILD=0"
-if /i "%~1"=="--rebuild" set "REBUILD=1"
-if not "%~1"=="" if /i not "%~1"=="--rebuild" (
-  echo [错误] 不认识的参数：%~1
-  echo        用法：start.cmd          正常启动
-  echo              start.cmd --rebuild  强制重新构建前端后启动
-  goto :fail
+set "RESETDB=0"
+
+:parse_args
+if "%~1"=="" goto :args_done
+if /i "%~1"=="--rebuild" (
+  set "REBUILD=1"
+  shift
+  goto :parse_args
 )
+if /i "%~1"=="--reset-db" (
+  set "RESETDB=1"
+  shift
+  goto :parse_args
+)
+echo [错误] 不认识的参数：%~1
+echo        用法：start.cmd             正常启动（不会删除任何数据）
+echo              start.cmd --rebuild   强制重新构建前端后启动
+echo              start.cmd --reset-db  清空数据库后重建（会二次确认）
+goto :fail
+:args_done
 
 echo.
 echo ==================== PQL Health 一键启动 ====================
@@ -60,11 +80,12 @@ if errorlevel 1 (
 for /f "delims=" %%v in ('%PY% --version 2^>^&1') do echo        %%v
 for /f "delims=" %%v in ('node --version') do echo        Node.js %%v
 
-netstat -ano -p tcp | findstr /r /c:":8000 .*LISTENING" >nul 2>&1
+netstat -ano -p tcp | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1
 if not errorlevel 1 (
-  echo [错误] 8000 端口已被占用，可能已经有一个后端在运行。
+  echo [错误] %PORT% 端口已被占用，可能已经有一个后端在运行。
   echo        如果是之前打开的 PQL Health，直接访问 %URL% 即可；
-  echo        否则请先关闭占用 8000 端口的程序，再运行本脚本。
+  echo        否则请先关闭占用 %PORT% 端口的程序，再运行本脚本。
+  if "%RESETDB%"=="1" echo        清空数据库前也必须先关闭正在运行的 PQL Health。
   goto :fail
 )
 
@@ -101,6 +122,18 @@ if "%NEED_PIP%"=="0" (
   )
   copy /y "%API%\requirements.txt" "%API%\.venv\.requirements.installed" >nul
 )
+
+rem ---------------------------------------------------------------- 可选：清空数据库
+rem Only reachable with --reset-db; everything else in this script leaves the DB alone.
+rem scripts\reset_db.py asks twice in Chinese, then deletes the DB file (cmd's own
+rem set /p is unreliable with UTF-8 prompts, so the prompts live in Python).
+if not "%RESETDB%"=="1" goto :reset_done
+pushd "%API%"
+"%VPY%" "%ROOT%scripts\reset_db.py"
+set "RCODE=%ERRORLEVEL%"
+popd
+if not "%RCODE%"=="0" goto :fail
+:reset_done
 
 rem ---------------------------------------------------------------- 3. 本地配置 .env
 if exist "%ROOT%.env" (
@@ -159,7 +192,7 @@ if "%REBUILD%"=="0" (
 popd
 
 rem ---------------------------------------------------------------- 5. 数据库迁移
-echo [5/5] 数据库迁移（默认数据库 data\app.db）...
+if "%RESETDB%"=="1" (echo [5/5] 重建数据库 ...) else (echo [5/5] 数据库迁移（默认数据库 data\app.db）...)
 pushd "%API%"
 "%VPY%" -c "from app.core.db import init_db; init_db()"
 if errorlevel 1 (
@@ -176,7 +209,7 @@ echo   浏览器会自动打开；关闭本窗口或按 Ctrl+C 即停止服务�
 echo ============================================================
 echo.
 start "" /b powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$u='%URL%'; for($i=0; $i -lt 120; $i++){ try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 ($u + '/health') | Out-Null; Start-Process $u; break } catch { Start-Sleep -Milliseconds 500 } }"
-"%VPY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+"%VPY%" -m uvicorn app.main:app --host 127.0.0.1 --port %PORT%
 set "CODE=%ERRORLEVEL%"
 popd
 if not "%CODE%"=="0" (

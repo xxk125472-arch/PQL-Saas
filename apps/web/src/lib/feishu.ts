@@ -1,4 +1,4 @@
-import { ApiError, request } from './api'
+import { ApiError, ERROR_CODE, request } from './api'
 import type { FeishuConfig, FeishuConfigUpdate, FeishuFieldMapping, FeishuSyncResult, FeishuTestResult } from './types'
 
 /** Template defaults — mirror DEFAULT_FIELD_MAPPING in apps/api/app/services/feishu.py. */
@@ -12,17 +12,35 @@ export const DEFAULT_FIELD_MAPPING: FeishuFieldMapping = {
   event_type_values: {},
 }
 
+/** A config counts as present only once it has an App ID (PUT requires one; .env supplies one). */
+export function isFeishuConfigured(c: FeishuConfig | null | undefined): c is FeishuConfig {
+  return Boolean(c && c.app_id && c.app_id.trim())
+}
+
 /**
- * GET /integrations/feishu/config. The backend answers 400 FEISHU_* when nothing is configured
- * (neither saved in the DB nor present in the local .env) — that is "未配置", not an error.
+ * GET /integrations/feishu/config → the config, or null for "未配置".
+ * "未配置" is either 200 with an empty config, or FEISHU_CREDENTIALS_MISSING (older backends) —
+ * neither is an error. Every other failure is thrown and shown with its Chinese `detail`.
  */
 export async function getFeishuConfig(): Promise<FeishuConfig | null> {
   try {
-    return await request<FeishuConfig>('/integrations/feishu/config')
+    const c = await request<FeishuConfig>('/integrations/feishu/config')
+    return isFeishuConfigured(c) ? c : null
   } catch (err) {
-    if (err instanceof ApiError && err.status === 400 && (err.code ?? '').startsWith('FEISHU_')) return null
+    if (err instanceof ApiError && err.code === ERROR_CODE.FEISHU_CREDENTIALS_MISSING) return null
     throw err
   }
+}
+
+/** Secret field display: `****` + last 4 chars when the backend exposes them, else `********`. */
+export function maskedSecret(masked: string | null | undefined): string {
+  const tail = (masked ?? '').replace(/[*•]/g, '')
+  return tail.length >= 4 ? `****${tail.slice(-4)}` : '********'
+}
+
+/** Whether the backend reports a stored secret (a bare `****` mask of nothing doesn't count). */
+export function hasSecret(masked: string | null | undefined): boolean {
+  return Boolean(masked && masked.trim())
 }
 
 export function saveFeishuConfig(body: FeishuConfigUpdate) {
