@@ -59,11 +59,11 @@ def create_run(
     db: Session = Depends(get_db),
 ) -> AnalysisRunResponse | JSONResponse:
     if body.skill_id != "weekly_focus_v1":
-        return _error(400, "仅支持官方 Skill weekly_focus_v1。", "skill_not_allowed")
+        return _error(400, "仅支持官方 Skill weekly_focus_v1。", "SKILL_NOT_ALLOWED")
     try:
         params = normalize_params(body.params or {})
     except ValueError as exc:
-        return _error(400, str(exc), "invalid_analysis_params")
+        return _error(400, str(exc), "INVALID_ANALYSIS_PARAMS")
 
     start = time.perf_counter()
     settings = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
@@ -128,5 +128,5 @@ def get_run(
         .first()
     )
     if not run:
-        return _error(404, "未找到该分析记录。", "analysis_run_not_found")
+        return _error(404, "未找到该分析记录。", "ANALYSIS_RUN_NOT_FOUND")
     return _to_response(run)

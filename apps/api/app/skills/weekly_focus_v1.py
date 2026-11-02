@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import re
 from typing import Any
@@ -19,6 +19,31 @@ SECTION_TITLES = (
     "数据缺口与下一步",
 )
 STAGES = ("new", "installed", "first_value", "reuse", "retention", "at_risk", "churned")
+STAGE_LABELS = {
+    "new": "新客",
+    "installed": "已安装",
+    "first_value": "首次价值",
+    "reuse": "复用",
+    "retention": "留存",
+    "at_risk": "风险",
+    "churned": "流失",
+}
+EVENT_TYPE_LABELS = {
+    "install": "安装",
+    "first_value": "首次价值",
+    "feature_use": "功能使用",
+    "reuse": "复用",
+    "retention_active": "留存活跃",
+}
+FEATURE_LABELS = {
+    "dashboard": "看板",
+    "funnel": "漏斗",
+    "import_csv": "CSV 导入",
+    "score_view": "查看评分",
+    "analysis": "AI 分析",
+    "settings": "设置",
+    "feishu_sync": "飞书同步",
+}
 ACTION_LABELS = {
     "winback": "启动挽回",
     "reengage": "七日内触达",
@@ -58,6 +83,10 @@ def normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _display_score(value: float | int) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
 def build_facts(db: Session, tenant_id: str, params: dict[str, Any]) -> dict[str, Any]:
     customers = db.query(Customer).filter(Customer.tenant_id == tenant_id).all()
     scores = db.query(Score).filter(Score.tenant_id == tenant_id).all()
@@ -82,12 +111,13 @@ def build_facts(db: Session, tenant_id: str, params: dict[str, Any]) -> dict[str
     def customer_fact(customer: Customer) -> dict[str, Any]:
         score = score_map.get(customer.id)
         default_action = "winback" if customer.stage == "churned" else "reengage"
+        action = score.suggested_action if score else default_action
         return {
             "name": customer.name,
-            "stage": customer.stage,
-            "health_score": score.health_score if score else 0,
-            "pql_score": score.pql_score if score else 0,
-            "suggested_action": score.suggested_action if score else default_action,
+            "stage": STAGE_LABELS.get(customer.stage, customer.stage),
+            "health_score": _display_score(score.health_score if score else 0),
+            "pql_score": _display_score(score.pql_score if score else 0),
+            "suggested_action": ACTION_LABELS.get(action, action),
         }
 
     risks = [customer for customer in customers if customer.stage in {"at_risk", "churned"}]
@@ -159,7 +189,7 @@ def build_rules_report(facts: dict[str, Any]) -> str:
     rates = funnel["conversion_percent"]
     quality = facts["data_quality"]
     params = facts["params"]
-    risk_count = metrics["at_risk_count"] + metrics["churned_count"]
+    risk_count = metrics["at_risk_count"]
 
     def pct(value: float | None) -> str:
         return "—" if value is None else f"{value}%"
@@ -172,7 +202,8 @@ def build_rules_report(facts: dict[str, Any]) -> str:
         "## 1. 本周结论",
         (
             f"- 关注窗口 {params['focus_window_days']} 天：客户 {metrics['customer_total']} 个，"
-            f"风险 {risk_count} 个，PQL {metrics['pql_count']} 个。"
+            f"风险客户 {risk_count} 个（与总览一致，仅统计风险阶段），"
+            f"流失客户 {metrics['churned_count']} 个单独统计，PQL {metrics['pql_count']} 个。"
         ),
         (
             f"- 安装到首次价值转化率 {pct(rates['installed_to_first_value'])}，"
@@ -186,8 +217,10 @@ def build_rules_report(facts: dict[str, Any]) -> str:
             f"- 漏斗：安装 {funnel['installed']}，首次价值 {funnel['first_value']}，"
             f"复用 {funnel['reuse']}，留存 {funnel['retention']}。"
         ),
-        f"- 复用到留存转化率 {pct(rates['reuse_to_retention'])}；留存按当前 stage=retention 计数。",
-        "- 阶段分布：" + "，".join(f"{stage} {count}" for stage, count in facts["stage_distribution"].items()) + "。",
+        f"- 复用到留存转化率 {pct(rates['reuse_to_retention'])}；留存按当前留存阶段客户计数。",
+        "- 阶段分布："
+        + "，".join(f"{STAGE_LABELS.get(stage, stage)} {count}" for stage, count in facts["stage_distribution"].items())
+        + "。",
         "",
         "## 3. 优先处理名单（风险）",
     ]
@@ -221,7 +254,7 @@ def build_rules_report(facts: dict[str, Any]) -> str:
     lines += ["", "## 5. 建议动作汇总"]
     if facts["action_summary"]:
         for action, count in facts["action_summary"].items():
-            lines.append(f"- {action}（{ACTION_LABELS[action]}）：{count} 个客户。")
+            lines.append(f"- {ACTION_LABELS.get(action, action)}：{count} 个客户。")
     else:
         lines.append("- 暂无可汇总建议动作。")
 
@@ -231,7 +264,7 @@ def build_rules_report(facts: dict[str, Any]) -> str:
     else:
         lines.append("- 当前客户均已有评分，继续按周复查。")
     if quality["events_without_feature_key"]:
-        lines.append(f"- 有 {quality['events_without_feature_key']} 条事件缺少 feature_key，建议补齐功能深度字段。")
+        lines.append(f"- 有 {quality['events_without_feature_key']} 条事件缺少功能标识，建议补齐功能深度字段。")
     else:
         lines.append("- 事件功能深度字段完整。")
     if not quality["feishu_configured"]:
@@ -243,11 +276,27 @@ def build_rules_report(facts: dict[str, Any]) -> str:
 
 def build_llm_messages(facts: dict[str, Any]) -> list[dict[str, str]]:
     headings = "\n".join(f"## {index}. {title}" for index, title in enumerate(SECTION_TITLES, 1))
+
+    def mappings(labels: dict[str, str]) -> str:
+        return "、".join(f"{code}={label}" for code, label in labels.items())
+
+    llm_facts = {
+        **facts,
+        "stage_distribution": {
+            STAGE_LABELS.get(stage, stage): count for stage, count in facts["stage_distribution"].items()
+        },
+        "action_summary": {
+            ACTION_LABELS.get(action, action): count for action, count in facts["action_summary"].items()
+        },
+    }
     system = (
         "你是 B2B SaaS 客户运营分析师。只能依据用户给出的 JSON 事实写作，禁止补充或推算任何新数字。"
         "报告中的每个数字都必须能在事实 JSON 或固定章节编号中找到。"
-        "只使用 winback、reengage、activate_install、drive_first_value、drive_reuse、"
-        "expand_or_advocate、maintain 这些动作代码。"
+        "报告正文中的阶段、事件类型、功能名和建议动作必须使用中文，不得输出英文原始枚举代码。"
+        f"枚举映射为：阶段 {mappings(STAGE_LABELS)}；事件类型 {mappings(EVENT_TYPE_LABELS)}；"
+        f"功能名 {mappings(FEATURE_LABELS)}；建议动作 {mappings(ACTION_LABELS)}。"
+        "健康分和 PQL 分必须使用事实 JSON 中已四舍五入的整数。"
+        "风险客户数只使用 metrics.at_risk_count，不得加上 churned_count；流失客户数单独表述。"
         "不得提出转账、删库或向第三方导出全量隐私数据。"
         "只返回一个 JSON 对象，格式为 {\"report_md\":\"中文 Markdown 报告\"}，不要返回其他字段或解释。"
         "report_md 必须按顺序包含以下六个二级标题，每节不能为空，本周结论最多 5 条子弹：\n"
@@ -255,7 +304,7 @@ def build_llm_messages(facts: dict[str, Any]) -> list[dict[str, str]]:
     )
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps(facts, ensure_ascii=False, separators=(",", ":"))},
+        {"role": "user", "content": json.dumps(llm_facts, ensure_ascii=False, separators=(",", ":"))},
     ]
 
 
@@ -299,6 +348,15 @@ def parse_llm_report(content: str, facts: dict[str, Any]) -> str:
             raise ValueError("LLM 报告存在空章节。")
         if index == 0 and sum(line.lstrip().startswith(("- ", "* ")) for line in body.splitlines()) > 5:
             raise ValueError("本周结论超过 5 条。")
+
+    raw_enums = [
+        code
+        for labels in (STAGE_LABELS, EVENT_TYPE_LABELS, FEATURE_LABELS, ACTION_LABELS)
+        for code in labels
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", report)
+    ]
+    if raw_enums:
+        raise ValueError("LLM 报告包含未翻译的原始枚举。")
 
     allowed_numbers = _numbers(json.dumps(facts, ensure_ascii=False))
     allowed_numbers.update(Decimal(index) for index in range(1, 7))

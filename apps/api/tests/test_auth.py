@@ -46,6 +46,35 @@ def register(client: TestClient) -> str:
     return response.json()["access_token"]
 
 
+@pytest.mark.parametrize("identifier", ["duplicate@example.com", "duplicate-user"])
+def test_duplicate_registration_returns_identifier_taken(client: TestClient, identifier: str):
+    payload = {"identifier": identifier, "password": "secret12"}
+    first = client.post("/api/v1/auth/register", json=payload)
+    assert first.status_code == 200, first.text
+
+    response = client.post("/api/v1/auth/register", json=payload)
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "该用户名已注册", "code": "IDENTIFIER_TAKEN"}
+
+
+@pytest.mark.parametrize(
+    ("identifier", "password"),
+    [("login-check@example.com", "wrong-password"), ("missing@example.com", "secret12")],
+)
+def test_invalid_login_returns_distinct_credentials_error(client: TestClient, identifier: str, password: str):
+    registered = client.post(
+        "/api/v1/auth/register",
+        json={"identifier": "login-check@example.com", "password": "secret12"},
+    )
+    assert registered.status_code == 200, registered.text
+
+    response = client.post("/api/v1/auth/login", json={"identifier": identifier, "password": password})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "账号或密码错误", "code": "INVALID_CREDENTIALS"}
+
+
 def test_logout_revokes_old_token_and_new_login_works(db_session: Session, client: TestClient):
     old_token = register(client)
     old_headers = {"Authorization": f"Bearer {old_token}"}

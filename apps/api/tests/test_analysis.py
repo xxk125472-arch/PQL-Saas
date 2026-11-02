@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,9 +10,16 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_db
 from app.main import app
-from app.models import TenantSettings, User
+from app.models import Customer, Score, TenantSettings, User
 from app.services import llm
-from app.skills.weekly_focus_v1 import SECTION_TITLES
+from app.skills.weekly_focus_v1 import (
+    SECTION_TITLES,
+    build_facts,
+    build_llm_messages,
+    build_rules_report,
+    normalize_params,
+    parse_llm_report,
+)
 
 
 @pytest.fixture()
@@ -69,7 +77,7 @@ def valid_llm_report(conclusion: str = "- 优先处理风险客户并持续复�
 优先跟进事实名单中的 PQL 客户。
 
 ## 5. 建议动作汇总
-按 reengage 和 expand_or_advocate 执行跟进。
+按七日内触达和扩展或转介绍执行跟进。
 
 ## 6. 数据缺口与下一步
 补齐事实中提示的数据缺口。"""
@@ -78,6 +86,102 @@ def valid_llm_report(conclusion: str = "- 优先处理风险客户并持续复�
 def assert_six_sections(report: str):
     for index, title in enumerate(SECTION_TITLES, 1):
         assert f"## {index}. {title}" in report
+
+
+def test_analysis_error_codes(client: TestClient):
+    headers = register(client, "analysis-errors@example.com")
+
+    invalid_skill = client.post("/api/v1/analysis/runs", json={"skill_id": "unknown"}, headers=headers)
+    assert invalid_skill.status_code == 400
+    assert invalid_skill.json()["code"] == "SKILL_NOT_ALLOWED"
+
+    invalid_params = client.post(
+        "/api/v1/analysis/runs",
+        json={"skill_id": "weekly_focus_v1", "params": {"risk_limit": 0}},
+        headers=headers,
+    )
+    assert invalid_params.status_code == 400
+    assert invalid_params.json()["code"] == "INVALID_ANALYSIS_PARAMS"
+
+    missing_run = client.get("/api/v1/analysis/runs/missing", headers=headers)
+    assert missing_run.status_code == 404
+    assert missing_run.json()["code"] == "ANALYSIS_RUN_NOT_FOUND"
+
+
+def test_report_facts_use_chinese_enums_integer_scores_and_overview_risk_definition(
+    db_session: Session,
+    client: TestClient,
+):
+    headers = register(client, "report-display@example.com")
+    user = db_session.query(User).filter(User.email == "report-display@example.com").one()
+    customer = Customer(
+        id="report-risk",
+        tenant_id=user.tenant_id,
+        external_id="REPORT-RISK",
+        name="风险客户甲",
+        stage="at_risk",
+        source="csv",
+    )
+    churned = Customer(
+        id="report-churned",
+        tenant_id=user.tenant_id,
+        external_id="REPORT-CHURNED",
+        name="流失客户甲",
+        stage="churned",
+        source="csv",
+    )
+    db_session.add_all([customer, churned])
+    db_session.add(
+        Score(
+            id="report-risk-score",
+            tenant_id=user.tenant_id,
+            customer_id=customer.id,
+            health_score=13.5,
+            pql_score=82.5,
+            is_pql=False,
+            suggested_action="reengage",
+        )
+    )
+    db_session.commit()
+
+    facts = build_facts(db_session, user.tenant_id, normalize_params({}))
+    report = build_rules_report(facts)
+    messages = build_llm_messages(facts)
+    llm_facts = json.loads(messages[1]["content"])
+
+    assert facts["metrics"]["at_risk_count"] == 1
+    assert facts["metrics"]["churned_count"] == 1
+    risk = next(item for item in facts["risk_customers"] if item["name"] == "风险客户甲")
+    assert risk == {
+        "name": "风险客户甲",
+        "stage": "风险",
+        "health_score": 14,
+        "pql_score": 83,
+        "suggested_action": "七日内触达",
+    }
+    assert "风险客户 1 个（与总览一致，仅统计风险阶段），流失客户 1 个单独统计" in report
+    assert "| 风险客户甲 | 风险 | 14 | 83 | 七日内触达 |" in report
+    assert "13.5" not in report
+    assert "82.5" not in report
+    assert set(llm_facts["stage_distribution"]) == {"新客", "已安装", "首次价值", "复用", "留存", "风险", "流失"}
+    assert set(llm_facts["action_summary"]) == {"七日内触达"}
+    for raw_enum in (
+        "at_risk",
+        "churned",
+        "retention",
+        "reengage",
+        "winback",
+        "feature_use",
+        "retention_active",
+        "dashboard",
+        "import_csv",
+        "score_view",
+        "feishu_sync",
+    ):
+        assert not re.search(rf"(?<![A-Za-z0-9_]){raw_enum}(?![A-Za-z0-9_])", report)
+
+    rounded_score_report = valid_llm_report("- 风险客户健康分 14，PQL 分 83。")
+    assert parse_llm_report(json.dumps({"report_md": rounded_score_report}), facts) == rounded_score_report
 
 
 def test_rules_only_without_key_has_six_sections_and_history(client: TestClient, monkeypatch):
@@ -98,6 +202,10 @@ def test_rules_only_without_key_has_six_sections_and_history(client: TestClient,
     assert payload["latency_ms"] >= 0
     assert_six_sections(payload["report_md"])
     assert "> 提示：当前为规则回退，未调用 LLM。" in payload["report_md"]
+    overview = client.get("/api/v1/overview/funnel", headers=headers)
+    assert overview.status_code == 200, overview.text
+    assert f"风险客户 {overview.json()['at_risk_count']} 个" in payload["report_md"]
+    assert f"流失客户 {overview.json()['churned_count']} 个单独统计" in payload["report_md"]
 
     history = client.get("/api/v1/analysis/runs", headers=headers)
     assert history.status_code == 200
@@ -176,6 +284,24 @@ def test_llm_invented_number_falls_back_to_rules(client: TestClient, monkeypatch
     assert response.json()["mode"] == "rules_only"
     assert "事实集之外的数字" in response.json()["error"]
     assert_six_sections(response.json()["report_md"])
+
+
+def test_llm_raw_enum_falls_back_to_chinese_rules(client: TestClient, monkeypatch):
+    headers = register(client, "raw-enum@example.com")
+    assert configure_llm(client, headers).status_code == 200
+    report = valid_llm_report().replace("七日内触达", "reengage")
+    monkeypatch.setattr(
+        llm,
+        "chat_completion",
+        lambda *args, **kwargs: json.dumps({"report_md": report}, ensure_ascii=False),
+    )
+
+    response = client.post("/api/v1/analysis/runs", json={}, headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["mode"] == "rules_only"
+    assert "未翻译的原始枚举" in response.json()["error"]
+    assert "reengage" not in response.json()["report_md"]
 
 
 def test_llm_gateway_uses_thirty_second_timeout(db_session: Session, client: TestClient, monkeypatch):

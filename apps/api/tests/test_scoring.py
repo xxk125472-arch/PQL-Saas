@@ -10,6 +10,7 @@ from app.core.db import Base, get_db
 from app.core.timeutil import utcnow
 from app.main import app
 from app.models import Customer, Event, Score, TenantSettings, User
+from app.services import llm
 from app.services.defaults import DEFAULT_HEALTH_WEIGHTS, DEFAULT_PQL_WEIGHTS
 from app.services.scoring import compute_health, compute_pql, recalculate_tenant
 
@@ -163,6 +164,7 @@ def test_settings_threshold_and_weights_recalculate_customer_score(
         headers=headers,
     )
     assert invalid_response.status_code == 400
+    assert invalid_response.json() == {"detail": "健康分权重之和必须为 1.0。", "code": "INVALID_HEALTH_WEIGHTS"}
 
     stage_only_weights = {"recency": 0.0, "frequency": 0.0, "depth": 0.0, "stage_progress": 1.0}
     weights_response = client.put(
@@ -174,6 +176,46 @@ def test_settings_threshold_and_weights_recalculate_customer_score(
     recalculated = client.get(f"/api/v1/customers/{customer.id}", headers=headers).json()["score"]
     assert recalculated["health_score"] == 100
     assert recalculated["health_breakdown"]["stage_progress"] == 100
+
+
+def test_settings_error_codes(client: TestClient, monkeypatch):
+    headers = register(client, "settings-errors@example.com")
+    invalid_pql_weights = {"activation": 0.9, "engagement": 0.0, "health": 0.0, "recency_boost": 0.0}
+
+    pql_response = client.put("/api/v1/settings", json={"pql_weights": invalid_pql_weights}, headers=headers)
+    assert pql_response.status_code == 400
+    assert pql_response.json()["code"] == "INVALID_PQL_WEIGHTS"
+
+    settings_url_response = client.put("/api/v1/settings", json={"llm_base_url": "not-a-url"}, headers=headers)
+    assert settings_url_response.status_code == 400
+    assert settings_url_response.json()["code"] == "INVALID_LLM_BASE_URL"
+
+    llm_url_response = client.put("/api/v1/settings/llm", json={"base_url": "not-a-url"}, headers=headers)
+    assert llm_url_response.status_code == 400
+    assert llm_url_response.json()["code"] == "INVALID_LLM_BASE_URL"
+
+    timeout_response = client.put("/api/v1/settings/llm", json={"timeout_sec": 0}, headers=headers)
+    assert timeout_response.status_code == 400
+    assert timeout_response.json()["code"] == "INVALID_LLM_TIMEOUT"
+
+    not_configured = client.post("/api/v1/settings/llm/test", headers=headers)
+    assert not_configured.status_code == 400
+    assert not_configured.json()["code"] == "LLM_NOT_CONFIGURED"
+
+    configured = client.put(
+        "/api/v1/settings/llm",
+        json={"base_url": "https://llm.example.com/v1", "api_key": "sk-test", "model": "demo-model"},
+        headers=headers,
+    )
+    assert configured.status_code == 200, configured.text
+
+    def fail_completion(*args, **kwargs):
+        raise llm.LLMError("LLM 调用失败。")
+
+    monkeypatch.setattr(llm, "chat_completion", fail_completion)
+    failed = client.post("/api/v1/settings/llm/test", headers=headers)
+    assert failed.status_code == 502
+    assert failed.json() == {"detail": "LLM 调用失败。", "code": "LLM_TEST_FAILED"}
 
 
 def test_customer_filters_total_sort_and_query_count(db_session: Session, client: TestClient):

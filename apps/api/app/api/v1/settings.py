@@ -78,7 +78,7 @@ def get_settings(
 ) -> SettingsResponse | JSONResponse:
     s = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
     if not s:
-        return _error(404, "未找到当前租户设置。", "settings_not_found")
+        return _error(404, "未找到当前租户设置。", "SETTINGS_NOT_FOUND")
     return _to_resp(s)
 
 
@@ -90,20 +90,20 @@ def put_settings(
 ) -> SettingsResponse | JSONResponse:
     s = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
     if not s:
-        return _error(404, "未找到当前租户设置。", "settings_not_found")
+        return _error(404, "未找到当前租户设置。", "SETTINGS_NOT_FOUND")
     if body.health_weights is not None:
         if not weights_sum_ok(body.health_weights):
-            return _error(400, "健康分权重之和必须为 1.0。", "invalid_health_weights")
+            return _error(400, "健康分权重之和必须为 1.0。", "INVALID_HEALTH_WEIGHTS")
         s.health_weights = body.health_weights
     if body.pql_weights is not None:
         if not weights_sum_ok(body.pql_weights):
-            return _error(400, "PQL 权重之和必须为 1.0。", "invalid_pql_weights")
+            return _error(400, "PQL 权重之和必须为 1.0。", "INVALID_PQL_WEIGHTS")
         s.pql_weights = body.pql_weights
     if body.llm_base_url is not None:
         try:
             s.llm_base_url = _normalize_base_url(body.llm_base_url)
         except ValueError as exc:
-            return _error(400, str(exc), "invalid_llm_base_url")
+            return _error(400, str(exc), "INVALID_LLM_BASE_URL")
     for field in (
         "pql_threshold",
         "silent_risk_days",
@@ -135,12 +135,12 @@ def put_llm_settings(
 ) -> LLMSettingsResponse | JSONResponse:
     s = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
     if not s:
-        return _error(404, "未找到当前租户设置。", "settings_not_found")
+        return _error(404, "未找到当前租户设置。", "SETTINGS_NOT_FOUND")
     if body.base_url is not None:
         try:
             s.llm_base_url = _normalize_base_url(body.base_url)
         except ValueError as exc:
-            return _error(400, str(exc), "invalid_llm_base_url")
+            return _error(400, str(exc), "INVALID_LLM_BASE_URL")
     if body.model is not None:
         s.llm_model = body.model.strip() or None
     if body.api_key is not None:
@@ -148,7 +148,7 @@ def put_llm_settings(
         s.llm_api_key_enc = llm.encrypt_api_key(api_key) if api_key else None
     if body.timeout_sec is not None:
         if body.timeout_sec < 1 or body.timeout_sec > 300:
-            return _error(400, "超时时间必须在 1 到 300 秒之间。", "invalid_llm_timeout")
+            return _error(400, "超时时间必须在 1 到 300 秒之间。", "INVALID_LLM_TIMEOUT")
         s.llm_timeout_sec = body.timeout_sec
     db.commit()
     db.refresh(s)
@@ -162,7 +162,7 @@ def test_llm(
 ) -> dict[str, object] | JSONResponse:
     s = db.query(TenantSettings).filter(TenantSettings.tenant_id == user.tenant_id).first()
     if not llm.has_complete_config(s):
-        return _error(400, "LLM 配置不完整，请填写 Base URL、API Key 和 Model。", "llm_not_configured")
+        return _error(400, "LLM 配置不完整，请填写 Base URL、API Key 和 Model。", "LLM_NOT_CONFIGURED")
     try:
         llm.chat_completion(
             s,
@@ -172,5 +172,5 @@ def test_llm(
             ],
         )
     except llm.LLMError as exc:
-        return _error(502, str(exc), "llm_test_failed")
+        return _error(502, str(exc), "LLM_TEST_FAILED")
     return {"ok": True, "message": "LLM 连接测试成功。"}
