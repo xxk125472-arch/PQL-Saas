@@ -57,7 +57,3 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 默认 SQLite 数据库为仓库根目录的 `data/app.db`；启动时会自动创建 `data` 目录和数据库，也可通过 `DATABASE_URL` 覆盖。
 
-## Harness
-
-- 前端：Cursor / Opus
-- 后端：Qoder-CN / Kimi（本仓库 `apps/api`）
